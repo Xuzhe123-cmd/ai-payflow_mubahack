@@ -128,3 +128,193 @@
     @apply font-sans;
   }
 }
+/* ==========================================================================
+   AI PayFlow design tokens
+   --------------------------------------------------------------------------
+   Two accent families carry the core product idea and must never blur into
+   each other: `ai-*` is judgement (what the model concluded) and `chain-*` is
+   authority (what Sui allowed). Status colours are reserved for outcomes, so
+   a HIGH urgency badge can never be mistaken for a HIGH risk badge.
+   ========================================================================== */
+
+@theme inline {
+  --color-ai: var(--ai);
+  --color-ai-soft: var(--ai-soft);
+  --color-ai-border: var(--ai-border);
+  --color-chain: var(--chain);
+  --color-chain-soft: var(--chain-soft);
+  --color-chain-border: var(--chain-border);
+  --color-pos: var(--pos);
+  --color-pos-soft: var(--pos-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-neg: var(--neg);
+  --color-neg-soft: var(--neg-soft);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-hairline: var(--hairline);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+}
+
+:root {
+  --background: oklch(0.978 0.003 264);
+  --foreground: oklch(0.17 0.012 264);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.17 0.012 264);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.17 0.012 264);
+  --primary: oklch(0.21 0.02 264);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.965 0.004 264);
+  --secondary-foreground: oklch(0.21 0.02 264);
+  --muted: oklch(0.965 0.004 264);
+  --muted-foreground: oklch(0.52 0.014 264);
+  --accent: oklch(0.965 0.004 264);
+  --accent-foreground: oklch(0.21 0.02 264);
+  --border: oklch(0.918 0.005 264);
+  --input: oklch(0.918 0.005 264);
+  --ring: oklch(0.52 0.19 268);
+
+  --surface: oklch(1 0 0);
+  --surface-sunken: oklch(0.968 0.004 264);
+  --hairline: oklch(0.918 0.005 264);
+  --ink: oklch(0.17 0.012 264);
+  --ink-soft: oklch(0.45 0.014 264);
+  --ink-faint: oklch(0.62 0.012 264);
+
+  --ai: oklch(0.52 0.185 268);
+  --ai-soft: oklch(0.965 0.022 268);
+  --ai-border: oklch(0.88 0.055 268);
+
+  --chain: oklch(0.56 0.115 222);
+  --chain-soft: oklch(0.966 0.021 222);
+  --chain-border: oklch(0.87 0.05 222);
+
+  --pos: oklch(0.53 0.115 158);
+  --pos-soft: oklch(0.962 0.028 158);
+  --warn: oklch(0.62 0.135 72);
+  --warn-soft: oklch(0.968 0.038 82);
+  --neg: oklch(0.55 0.185 25);
+  --neg-soft: oklch(0.964 0.026 25);
+
+  --chart-1: oklch(0.52 0.185 268);
+  --chart-2: oklch(0.56 0.115 222);
+  --chart-3: oklch(0.53 0.115 158);
+  --chart-4: oklch(0.62 0.135 72);
+  --chart-5: oklch(0.55 0.185 25);
+}
+
+.dark {
+  --background: oklch(0.155 0.012 264);
+  --foreground: oklch(0.965 0.003 264);
+  --card: oklch(0.196 0.014 264);
+  --card-foreground: oklch(0.965 0.003 264);
+  --popover: oklch(0.196 0.014 264);
+  --popover-foreground: oklch(0.965 0.003 264);
+  --primary: oklch(0.93 0.004 264);
+  --primary-foreground: oklch(0.2 0.014 264);
+  --secondary: oklch(0.256 0.015 264);
+  --secondary-foreground: oklch(0.965 0.003 264);
+  --muted: oklch(0.256 0.015 264);
+  --muted-foreground: oklch(0.68 0.014 264);
+  --accent: oklch(0.256 0.015 264);
+  --accent-foreground: oklch(0.965 0.003 264);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.66 0.155 268);
+
+  --surface: oklch(0.196 0.014 264);
+  --surface-sunken: oklch(0.176 0.013 264);
+  --hairline: oklch(1 0 0 / 11%);
+  --ink: oklch(0.965 0.003 264);
+  --ink-soft: oklch(0.74 0.012 264);
+  --ink-faint: oklch(0.58 0.012 264);
+
+  --ai: oklch(0.72 0.145 272);
+  --ai-soft: oklch(0.28 0.055 270);
+  --ai-border: oklch(0.4 0.09 270);
+
+  --chain: oklch(0.72 0.105 222);
+  --chain-soft: oklch(0.27 0.045 222);
+  --chain-border: oklch(0.39 0.07 222);
+
+  --pos: oklch(0.72 0.125 158);
+  --pos-soft: oklch(0.27 0.05 158);
+  --warn: oklch(0.78 0.135 78);
+  --warn-soft: oklch(0.29 0.055 72);
+  --neg: oklch(0.68 0.17 25);
+  --neg-soft: oklch(0.29 0.07 25);
+
+  --chart-1: oklch(0.72 0.145 272);
+  --chart-2: oklch(0.72 0.105 222);
+  --chart-3: oklch(0.72 0.125 158);
+  --chart-4: oklch(0.78 0.135 78);
+  --chart-5: oklch(0.68 0.17 25);
+}
+
+@layer base {
+  /* Financial figures must align column-to-column, everywhere, always. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+  body {
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  .hairline-b {
+    border-bottom: 1px solid var(--hairline);
+  }
+  .hairline-t {
+    border-top: 1px solid var(--hairline);
+  }
+  /* Used by the analysis screens: results arrive, they do not slide around. */
+  @keyframes payflow-rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .animate-rise {
+    animation: payflow-rise 0.36s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+  @keyframes payflow-pulse-ring {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklch, var(--pos) 45%, transparent);
+    }
+    70% {
+      box-shadow: 0 0 0 6px color-mix(in oklch, var(--pos) 0%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 0 color-mix(in oklch, var(--pos) 0%, transparent);
+    }
+  }
+  .animate-live {
+    animation: payflow-pulse-ring 2.4s ease-out infinite;
+  }
+  @keyframes payflow-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes payflow-sweep {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  .animate-sweep {
+    background-size: 200% 100%;
+    animation: payflow-sweep 1.4s linear infinite;
+  }
+}

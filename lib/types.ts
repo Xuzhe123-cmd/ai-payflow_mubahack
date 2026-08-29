@@ -347,9 +347,29 @@ export interface PolicyViolation {
   detail: string;
 }
 
+/**
+ * One on-chain assertion, reported whether it passed or failed.
+ *
+ * The violation list alone cannot drive the UI: showing only what failed would
+ * hide the checks that actually ran, which is the part that makes enforcement
+ * legible. Each check mirrors exactly one Move `assert!`.
+ */
+export interface PolicyCheck {
+  code: PolicyViolationCode;
+  label: string;
+  passed: boolean;
+  detail: string;
+  /** The limit the chain enforces, rendered for display. */
+  limit: string | null;
+  /** What the request actually asked for, rendered for display. */
+  actual: string | null;
+}
+
 export interface PolicyEnforcementResult {
   outcome: "APPROVED" | "SUI_REJECT";
   violations: PolicyViolation[];
+  /** Every assertion in evaluation order — passed and failed alike. */
+  checks: PolicyCheck[];
 }
 
 // ---------------------------------------------------------------------------

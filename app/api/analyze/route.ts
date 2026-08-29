@@ -10,8 +10,17 @@
 import { NextResponse } from "next/server";
 
 import { selectDecisionEngine } from "@/lib/ai/engine";
+import { createRecordedEngine } from "@/lib/ai/recordedEngine";
+import {
+  RECORDED_RESPONSES,
+  hasRecordingFor,
+  readEngineMode,
+  type EngineMode,
+} from "@/lib/ai/recordings";
+import { buildProjection } from "@/lib/deterministic/projection";
 import { SCENARIOS, scenarioById } from "@/lib/demo/scenarios";
 import { runScenario } from "@/lib/demo/runScenario";
+import type { AnalysisResponse } from "@/lib/services/contracts";
 
 export const runtime = "nodejs";
 /** Every run calls a model; caching would defeat the point. */
@@ -47,22 +56,62 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `Unknown scenario: ${scenarioId}` }, { status: 404 });
   }
 
-  const selection = selectDecisionEngine(process.env);
+  // Replay is opt-in only. A failed live call still escalates to the safety
+  // fallback rather than quietly borrowing a recording.
+  const wantsRecorded =
+    readEngineMode(process.env) === "recorded" && hasRecordingFor(scenario.id);
+
+  const selection = wantsRecorded
+    ? {
+        engine: createRecordedEngine(RECORDED_RESPONSES, { keyFor: () => scenario.id }),
+        live: true,
+        modelId:
+          RECORDED_RESPONSES.find((entry) => entry.scenarioId === scenario.id)?.modelId ??
+          null,
+        reason: null,
+      }
+    : selectDecisionEngine(process.env);
+
   const run = await runScenario(scenario, selection.engine);
 
-  return NextResponse.json({
+  const engineMode: EngineMode =
+    run.decision.engine === "FALLBACK" ? "fallback" : wantsRecorded ? "recorded" : "live";
+
+  // Display-only projection, built from the same forecast the decision used so
+  // the chart and the recommendation can never disagree.
+  const projection = buildProjection({
+    world: scenario.world,
+    asOf: scenario.asOfDate,
+    payment: {
+      amountCents: run.analysis.invoiceFacts.amountCents,
+      dates: run.analysis.cashFlowScenarios.map((candidate) => candidate.paymentDate),
+    },
+  });
+
+  const payload: AnalysisResponse = {
     scenarioId: run.scenarioId,
+    scenario: {
+      id: scenario.id,
+      name: scenario.name,
+      description: scenario.description,
+    },
     asOfDate: run.asOfDate,
     // The engine is surfaced so the UI can never present a fallback as AI.
     engine: run.decision.engine,
+    engineMode,
     engineNotice: selection.live ? null : selection.reason,
     modelId: run.decision.modelId,
+    latencyMs: run.decision.latencyMs,
+    document: scenario.document,
     analysis: run.analysis,
     decision: run.decision.decision,
     guard: run.decision.guard,
+    projection,
     paymentRequest: run.paymentRequest,
     enforcement: run.enforcement,
     finalOutcome: run.finalOutcome,
     steps: run.steps,
-  });
+  };
+
+  return NextResponse.json(payload);
 }
