@@ -1,0 +1,6 @@
+{
+  "scenarioId": "s6_duplicate",
+  "modelId": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "recordedAt": "2026-08-29T12:24:52.062Z",
+  "raw": "{\"action\":\"REJECT\",\"cashFlowExplanation\":\"Timing is not a factor in this decision because the invoice is a duplicate and has already been settled.\",\"confidence\":1,\"decisionExplanation\":\"The invoice is a duplicate and has already been settled as payment pay_0x91ac. Therefore, there is no need to make another payment. The finance system has flagged this as a duplicate invoice, which confirms that the payment has already been made.\",\"reasons\":[\"The invoice number INV-2026-3391 has already been settled.\",\"The payment has already been made as pay_0x91ac.\",\"There is no need to make another payment for the same invoice.\"],\"recommendedDate\":\"None\",\"risk\":\"HIGH\",\"riskExplanation\":\"The invoice is a duplicate and has already been settled, which makes it a high-risk payment if it were to be made again.\",\"urgency\":\"LOW\"}"
+}

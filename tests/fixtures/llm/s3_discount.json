@@ -1,0 +1,6 @@
+{
+  "scenarioId": "s3_discount",
+  "modelId": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "recordedAt": "2026-08-29T12:24:33.619Z",
+  "raw": "{\"action\":\"AUTO_PAY\",\"cashFlowExplanation\":\"Paying today leaves the projected minimum cash at $107,100, which is above the minimum reserve, and captures the early-payment discount of $600, resulting in a cash payout of $29,400.\",\"confidence\":0.9,\"decisionExplanation\":\"The invoice is from an approved supplier with a matching wallet, and all automated checks have passed. The payment amount is within reasonable bounds for this supplier, and paying today does not breach the minimum reserve. Therefore, it is recommended to pay the invoice today to capture the discount.\",\"reasons\":[\"The supplier is registered and approved.\",\"The invoice amount matches the purchase order.\",\"The wallet for payment matches the registered wallet for this supplier.\",\"All automated checks have passed.\",\"Paying today captures the early-payment discount.\"],\"recommendedDate\":\"2026-08-29\",\"risk\":\"LOW\",\"riskExplanation\":\"The supplier is known and approved, the invoice matches the purchase order, and the payment wallet matches the one on file for this supplier, indicating a low risk of this being an erroneous or fraudulent payment.\",\"urgency\":\"LOW\"}"
+}

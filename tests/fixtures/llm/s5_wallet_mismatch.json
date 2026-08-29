@@ -1,0 +1,6 @@
+{
+  "scenarioId": "s5_wallet_mismatch",
+  "modelId": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "recordedAt": "2026-08-29T12:24:46.343Z",
+  "raw": "{\"action\":\"HUMAN_REVIEW\",\"cashFlowExplanation\":\"The payment timing is not the deciding factor in this case, as the invoice's legitimacy is in question due to the wallet mismatch.\",\"confidence\":0.8,\"decisionExplanation\":\"The invoice is from a registered and approved supplier, but the remit wallet does not match the one on file, which raises concerns about the payment's legitimacy. Therefore, it is best to escalate this to a human reviewer for further investigation. The supplier's high business criticality and good payment history are noted, but the wallet mismatch takes precedence.\",\"reasons\":[\"The remit wallet does not match the one on file for this supplier\",\"The supplier is registered and approved\",\"The payment amount is within the expected range for this supplier\"],\"recommendedDate\":\"null\",\"risk\":\"HIGH\",\"riskExplanation\":\"The remit wallet mismatch introduces a significant risk of incorrect payment, as it may not be the legitimate wallet for the supplier.\",\"urgency\":\"MEDIUM\"}"
+}

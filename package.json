@@ -7,7 +7,14 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && next build",
     "start": "next start",
-    "lint": "eslint . --ignore-pattern \"convex/_generated/**\""
+    "lint": "eslint . --ignore-pattern \"convex/_generated/**\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "vitest run --config vitest.live.config.mts",
+    "record:llm": "tsx scripts/recordLlm.ts",
+    "scenarios": "tsx scripts/scenarios.ts",
+    "prompt": "tsx scripts/showPrompt.ts",
+    "check:ai": "tsx scripts/checkAi.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -34,6 +41,8 @@
     "eslint-config-next": "16.3.0",
     "prettier": "^3.9.6",
     "tailwindcss": "^4.3.3",
-    "typescript": "^6.0.3"
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
   }
 }

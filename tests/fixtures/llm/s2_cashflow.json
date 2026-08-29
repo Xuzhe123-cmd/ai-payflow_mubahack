@@ -1,0 +1,6 @@
+{
+  "scenarioId": "s2_cashflow",
+  "modelId": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "recordedAt": "2026-08-29T12:24:26.914Z",
+  "raw": "{\"action\":\"SCHEDULE\",\"cashFlowExplanation\":\"The payment is scheduled for 2026-09-01, as this date does not breach the minimum reserve and leaves sufficient liquidity, with a projected minimum cash of $65,000 on 2026-09-04.\",\"confidence\":0.9,\"decisionExplanation\":\"This invoice is from an approved supplier with a matching wallet, and all automated checks have passed. The amount is reasonable compared to the supplier's average and largest invoices. Since paying today would breach the minimum reserve, it is better to schedule the payment for a later date that ensures sufficient liquidity. The due date is still met, and no early-payment discount is missed.\",\"reasons\":[\"The supplier is registered and approved.\",\"The invoice amount matches the purchase order.\",\"The remit wallet matches the one on file for this supplier.\",\"All automated checks have passed.\",\"Paying today would breach the minimum reserve.\"],\"recommendedDate\":\"2026-09-01\",\"risk\":\"LOW\",\"riskExplanation\":\"The payment is considered low risk because the supplier is approved, the wallet matches, and all automated checks have passed, including a match between the invoice and the purchase order.\",\"urgency\":\"MEDIUM\"}"
+}

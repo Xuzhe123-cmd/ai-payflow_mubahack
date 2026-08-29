@@ -1,0 +1,6 @@
+{
+  "scenarioId": "s1_normal",
+  "modelId": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "recordedAt": "2026-08-29T12:24:19.440Z",
+  "raw": "{\"action\":\"AUTO_PAY\",\"cashFlowExplanation\":\"Paying today leaves the projected minimum cash at $155,600 on 2026-09-01, which is above the minimum reserve of $50,000 and does not breach the daily limit of $80,000.\",\"confidence\":0.9,\"decisionExplanation\":\"The invoice is from an approved supplier with a matching wallet, and all automated checks have passed. The payment amount is within the expected range for this supplier, and paying today does not strain liquidity. Therefore, it is recommended to pay the invoice today.\",\"reasons\":[\"The supplier is registered and approved.\",\"The invoice wallet matches the registered wallet.\",\"All automated checks have passed.\",\"The payment amount is reasonable for this supplier.\"],\"recommendedDate\":\"2026-08-29\",\"risk\":\"LOW\",\"riskExplanation\":\"The supplier is known and approved, the invoice details match the purchase order, and the payment amount is consistent with the supplier's history.\",\"urgency\":\"MEDIUM\"}"
+}

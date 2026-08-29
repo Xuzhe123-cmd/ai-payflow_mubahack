@@ -1,0 +1,6 @@
+{
+  "scenarioId": "s7_po_mismatch",
+  "modelId": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "recordedAt": "2026-08-29T12:24:58.204Z",
+  "raw": "{\"action\":\"HUMAN_REVIEW\",\"cashFlowExplanation\":\"The timing of this invoice is not the deciding factor due to the mismatch between the invoice amount and the purchase order.\",\"confidence\":0.8,\"decisionExplanation\":\"The invoice amount exceeds the purchase order by $4,900, which raises concerns about the legitimacy of the invoice. Therefore, it is necessary to escalate this to a human reviewer for further investigation. The payment amount is significant, and the supplier's history and business criticality do not outweigh the risk of overpayment.\",\"reasons\":[\"The invoice amount is $4,900 higher than the purchase order.\",\"The supplier has a history of on-time payments, but this discrepancy needs clarification.\",\"The business criticality of the supplier is high, but it does not justify automatic payment without resolving the mismatch.\"],\"recommendedDate\":\"null\",\"risk\":\"HIGH\",\"riskExplanation\":\"The invoice amount mismatch with the purchase order creates uncertainty and potential risk, making it essential to verify the invoice before proceeding with payment.\",\"urgency\":\"MEDIUM\"}"
+}
