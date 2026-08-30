@@ -32,6 +32,7 @@ import { buildPaymentRequest } from "./sui/paymentRequest";
 import { enforcePolicy } from "./sui/policyGuard";
 import type { SuiPolicyReader } from "./sui/policyReader";
 import { formatMoneyRounded } from "./util/money";
+import { DEMO_CLOCK_MS } from "./demo/clock";
 
 export interface PipelineInput {
   scenarioId: string;
@@ -40,6 +41,12 @@ export interface PipelineInput {
   asOf: IsoDate;
   engine: TreasuryDecisionEngine;
   policyReader?: SuiPolicyReader;
+  /**
+   * The instant the recommendation is issued and the expiry check is judged
+   * against. Defaults to the demo clock so the timestamps a judge sees belong
+   * to demo day rather than to whatever the host machine believes.
+   */
+  nowMs?: number;
   /**
    * Judge the payment under the agent's own capability even when policy would
    * route it to a human approver. Used by the security demonstration and by the
@@ -54,7 +61,11 @@ export interface PipelineOptions {
   onStep?: (step: PipelineStep) => void;
 }
 
-/** Injectable so tests stay deterministic; step timings are display-only. */
+/**
+ * Wall-clock, for step timings only — a stopwatch, not a calendar. Calendar
+ * questions ("is this recommendation stale?") read `input.nowMs` instead, which
+ * is pinned to the demo clock.
+ */
 type Clock = () => number;
 
 export async function runPipeline(
@@ -93,7 +104,8 @@ export async function runPipeline(
 
   // ---- Recommendation layer ------------------------------------------------
   // Advisory. Always produced, never permission to move funds.
-  const recommendation = buildPaymentRecommendation(decision.decision, analysis, clock());
+  const nowMs = input.nowMs ?? DEMO_CLOCK_MS;
+  const recommendation = buildPaymentRecommendation(decision.decision, analysis, nowMs);
 
   // ---- Sui / Move layer ----------------------------------------------------
   const paymentRequest = buildPaymentRequest(
@@ -130,7 +142,7 @@ export async function runPipeline(
       treasury: input.world.treasury,
       suppliers: input.world.suppliers,
       paymentHistory: input.world.paymentHistory,
-      nowMs: clock(),
+      nowMs,
     });
 
     if (enforcement.outcome === "SUI_REJECT") {

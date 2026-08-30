@@ -258,7 +258,10 @@ export interface ObjectChange {
 export interface TxResponse {
   digest: string;
   objectChanges?: ObjectChange[];
-  effects?: { status?: { status?: string; error?: string } };
+  effects?: {
+    status?: { status?: string; error?: string };
+    gasUsed?: Record<string, unknown>;
+  };
 }
 
 export function assertSucceeded(tx: TxResponse, label: string): void {
@@ -616,6 +619,22 @@ export function objectFields(objectId: string): Record<string, unknown> {
   return extractFields(getObject(objectId));
 }
 
+/**
+ * The address owning an object, or null for shared and immutable ones.
+ *
+ * Used to confirm a capability really is held by the address about to act with
+ * it — a manifest can go stale, and an owned object can be transferred away.
+ */
+export function objectOwner(objectId: string): string | null {
+  const object = getObject(objectId);
+  if (!isRecord(object)) return null;
+  const container = isRecord(object.data) ? object.data : object;
+  const owner = container.owner;
+  if (typeof owner === "string") return owner;
+  if (isRecord(owner) && typeof owner.AddressOwner === "string") return owner.AddressOwner;
+  return null;
+}
+
 export interface ExecutionOutcome {
   /** Whether the transaction actually succeeded on chain. */
   ok: boolean;
@@ -628,6 +647,15 @@ export interface ExecutionOutcome {
   /** Null when the transaction never reached the chain at all. */
   exitStatus?: number | null;
   argv?: readonly string[];
+  /**
+   * The parsed response, when the CLI produced one.
+   *
+   * Carried so a caller can read `objectChanges` — which is how the escrow flow
+   * learns the id of the PaymentEscrow it just created. Absent when the CLI
+   * printed something that was not JSON, which is exactly when there is no
+   * object to find either.
+   */
+  tx?: TxResponse | null;
 }
 
 /**
@@ -706,9 +734,9 @@ export function interpretExecution(raw: string): ExecutionOutcome {
     const status = tx.effects?.status?.status;
     const error = tx.effects?.status?.error ?? "";
     if (status === "success") {
-      return { ok: true, digest: tx.digest, abort: null, error: "", raw };
+      return { ok: true, digest: tx.digest, abort: null, error: "", raw, tx };
     }
-    return { ok: false, digest: tx.digest, abort: parseMoveAbort(error), error, raw };
+    return { ok: false, digest: tx.digest, abort: parseMoveAbort(error), error, raw, tx };
   }
 
   // No usable JSON — fall back to reading the text the CLI printed.
@@ -721,7 +749,32 @@ export function interpretExecution(raw: string): ExecutionOutcome {
     // legible even when it is not a Move abort at all.
     error: abort ? raw : (parseCliError(raw) ?? raw),
     raw,
+    tx: null,
   };
+}
+
+/** Every object a transaction created, with its full type. */
+export function createdObjects(tx: TxResponse | null | undefined): {
+  objectType: string;
+  objectId: string;
+}[] {
+  return (tx?.objectChanges ?? [])
+    .filter(
+      (change) =>
+        change.type === "created" &&
+        typeof change.objectType === "string" &&
+        typeof change.objectId === "string",
+    )
+    .map((change) => ({ objectType: change.objectType!, objectId: change.objectId! }));
+}
+
+/** Net gas charged by a transaction or dry run, in MIST. */
+export function gasChargedMist(tx: TxResponse | null | undefined): number | null {
+  const gas = tx?.effects?.gasUsed;
+  if (!gas) return null;
+  const n = (key: string) => Number(gas[key] ?? 0);
+  const total = n("computationCost") + n("storageCost") - n("storageRebate");
+  return Number.isFinite(total) ? Math.max(total, 0) : null;
 }
 
 export interface OnChainTransaction {
@@ -772,6 +825,185 @@ export function publish(packagePath: string, gasBudget = DEFAULT_GAS_BUDGET): Tx
   );
   assertSucceeded(tx, "publish");
   return tx;
+}
+
+/**
+ * Upgrades an already-published package.
+ *
+ * The CLI verifies upgrade compatibility locally before it will submit — the
+ * `--skip-verify-compatibility` flag exists precisely because that check is the
+ * default — so a dry run that returns at all has already established that the
+ * new bytecode is a legal successor to what is on chain.
+ */
+export function upgrade(
+  packagePath: string,
+  upgradeCapId: string,
+  gasBudget = DEFAULT_GAS_BUDGET,
+): TxResponse {
+  const tx = parseJson<TxResponse>(
+    run([
+      "client",
+      "upgrade",
+      "--upgrade-capability",
+      upgradeCapId,
+      "--gas-budget",
+      gasBudget,
+      "--json",
+      packagePath,
+    ]),
+  );
+  assertSucceeded(tx, "upgrade");
+  return tx;
+}
+
+export interface UpgradeDryRun {
+  ok: boolean;
+  /** Raw CLI output, kept whole — compatibility errors arrive here as prose. */
+  output: string;
+  /** Populated when the dry run produced a parseable transaction response. */
+  response: TxResponse | null;
+  error: string | null;
+}
+
+/**
+ * A real dry run: compiles, verifies compatibility, and asks a fullnode to
+ * execute the transaction without committing it.
+ *
+ * Never throws on a failed upgrade — a compatibility violation is information
+ * this script exists to report, not an exception to unwind.
+ */
+export function dryRunUpgrade(
+  packagePath: string,
+  upgradeCapId: string,
+  gasBudget = DEFAULT_GAS_BUDGET,
+): UpgradeDryRun {
+  const args = [
+    "client",
+    "upgrade",
+    "--upgrade-capability",
+    upgradeCapId,
+    "--gas-budget",
+    gasBudget,
+    "--dry-run",
+    "--json",
+    packagePath,
+  ];
+  try {
+    const output = run(args);
+    let response: TxResponse | null = null;
+    try {
+      response = parseJson<TxResponse>(output);
+    } catch {
+      // A dry run may print a human-readable effects summary instead of JSON.
+    }
+    return { ok: true, output, response, error: null };
+  } catch (error) {
+    return {
+      ok: false,
+      output: error instanceof SuiCliError ? error.output : "",
+      response: null,
+      error: describeCliError(error),
+    };
+  }
+}
+
+/** The unsigned transaction bytes, for showing exactly what would be sent. */
+export function serializeUpgrade(
+  packagePath: string,
+  upgradeCapId: string,
+  gasBudget = DEFAULT_GAS_BUDGET,
+): string | null {
+  try {
+    return run([
+      "client",
+      "upgrade",
+      "--upgrade-capability",
+      upgradeCapId,
+      "--gas-budget",
+      gasBudget,
+      "--serialize-unsigned-transaction",
+      packagePath,
+    ]).trim();
+  } catch {
+    return null;
+  }
+}
+
+
+/** One object found by type, with its Move fields already decoded. */
+export interface TypedObject {
+  objectId: string;
+  fields: Record<string, unknown>;
+}
+
+const TESTNET_GRAPHQL = "https://graphql.testnet.sui.io/graphql";
+
+/**
+ * Objects of an exact type, via GraphQL.
+ *
+ * NOT via `sui client objects --json`: that returns a BCS-shaped payload whose
+ * `type_` is a shorthand like "GasCoin" and whose contents are a byte array, so
+ * a full type string cannot be matched against it. The table output carries the
+ * type but parsing a rendered table to decide whether to create an object on
+ * chain is not a foundation worth building on.
+ *
+ * Matching on the FULL type string, package address included, is the point.
+ * After an upgrade a newly added module's types carry the UPGRADE's address
+ * while older modules keep the original — `oracle::OracleCap` and
+ * `agent::AgentCap` legitimately live at different packages.
+ *
+ * Throws rather than returning empty when the endpoint cannot be reached: a
+ * caller deciding whether to CREATE something must not read a network failure
+ * as "nothing exists".
+ */
+export async function objectsOfType(
+  structType: string,
+  owner: string | null = null,
+  graphqlUrl = TESTNET_GRAPHQL,
+): Promise<TypedObject[]> {
+  const filter = `filter: {type: "${structType}"}`;
+  const query = owner
+    ? `{ address(address: "${owner}") { objects(${filter}) { nodes { address contents { json } } } } }`
+    : `{ objects(${filter}) { nodes { address asMoveObject { contents { json } } } } }`;
+
+  const response = await fetch(graphqlUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `GraphQL object lookup failed with HTTP ${response.status}. Refusing to treat an ` +
+        "unreachable endpoint as proof that nothing exists.",
+    );
+  }
+
+  const body: unknown = await response.json();
+  if (!isRecord(body)) throw new Error("GraphQL returned a non-object response.");
+  if (Array.isArray(body.errors) && body.errors.length > 0) {
+    throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
+  }
+
+  const data = isRecord(body.data) ? body.data : null;
+  if (!data) return [];
+
+  const container = owner
+    ? isRecord(data.address) && isRecord(data.address.objects)
+      ? data.address.objects
+      : null
+    : isRecord(data.objects)
+      ? data.objects
+      : null;
+  const nodes = container && Array.isArray(container.nodes) ? container.nodes : [];
+
+  return nodes.flatMap((node) => {
+    if (!isRecord(node) || typeof node.address !== "string") return [];
+    // The owner-scoped and global queries nest the contents differently.
+    const holder = isRecord(node.asMoveObject) ? node.asMoveObject : node;
+    const contents = isRecord(holder.contents) ? holder.contents : null;
+    const json = contents && isRecord(contents.json) ? contents.json : {};
+    return [{ objectId: node.address, fields: json }];
+  });
 }
 
 // --- Local, offline verification ----------------------------------------------

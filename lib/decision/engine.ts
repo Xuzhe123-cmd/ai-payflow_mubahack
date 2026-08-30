@@ -25,6 +25,7 @@
 import type { IsoDate } from "../types";
 import type { ChainInvoice, ChainSnapshot } from "../sui/chainTypes";
 import { daysBetween } from "../util/date";
+import { DEMO_AS_OF_DATE } from "../demo/clock";
 import { evaluateAuthority } from "./authority";
 import { analyseCashFlow } from "./cashFlow";
 import { deterministicExplainer, preferredOption, type DecisionExplainer } from "./explain";
@@ -40,13 +41,18 @@ import {
 export interface DecisionInput {
   snapshot: ChainSnapshot;
   invoice: ChainInvoice;
-  /** The "today" of this run. Injected so a decision is reproducible. */
+  /** The "today" of this run. Injected so a decision is reproducible;
+   *  defaults to the demo clock, never to the system date. */
   asOf?: IsoDate;
   explainer?: DecisionExplainer;
 }
 
+/**
+ * The demo clock, never the host machine's. A decision opened on a judge's
+ * laptop in another timezone must match the one rehearsed on demo day.
+ */
 function todayIso(): IsoDate {
-  return new Date().toISOString().slice(0, 10);
+  return DEMO_AS_OF_DATE;
 }
 
 /**

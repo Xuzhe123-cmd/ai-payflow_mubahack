@@ -22,6 +22,7 @@ import { PURCHASE_ORDERS } from "../lib/demo/purchaseOrders";
 import { PAYMENT_HISTORY } from "../lib/demo/paymentHistory";
 import { SUPPLIERS } from "../lib/demo/suppliers";
 import { TREASURY_ACTIONS } from "../lib/ai/decisionSchema";
+import { addDays } from "../lib/util/date";
 import type {
   DecisionResult,
   RawInvoiceDocument,
@@ -61,15 +62,31 @@ function stubEngine(action: TreasuryAction, recommendedDate: string | null): Tre
 }
 
 describe("the fallback engine cannot cause a payment", () => {
-  it("only ever escalates, whatever the invoice looks like", async () => {
+  it("never returns a payment action, whatever the invoice looks like", async () => {
+    // The invariant is about what it CANNOT do. It escalates an open invoice
+    // and refuses a blocked one — never pays either, and never builds a request.
     const engine = createFallbackEngine("test: model unavailable");
     for (const scenario of SCENARIOS) {
       const run = await runScenario(scenario, engine);
-      expect(run.decision.decision.action).toBe("HUMAN_REVIEW");
-      expect(run.decision.engine).toBe("FALLBACK");
-      expect(run.paymentRequest).toBeNull();
-      expect(run.finalOutcome).toBe("HUMAN_REVIEW");
+      const action = run.decision.decision.action;
+
+      expect(["HUMAN_REVIEW", "REJECT"], scenario.id).toContain(action);
+      expect(run.decision.engine, scenario.id).toBe("FALLBACK");
+      expect(run.paymentRequest, scenario.id).toBeNull();
+      expect(run.finalOutcome, scenario.id).toBe(
+        action === "REJECT" ? "REJECTED" : "HUMAN_REVIEW",
+      );
     }
+  });
+
+  it("refuses a blocked invoice rather than handing it to a person", async () => {
+    // A redirected remit wallet is settled by the registry, not by judgement,
+    // so an outage must not reopen it as a question.
+    const run = await runScenario(
+      scenarioById("s5_wallet_mismatch"),
+      createFallbackEngine("test: model unavailable"),
+    );
+    expect(run.decision.decision.action).toBe("REJECT");
   });
 
   it("labels itself so a degraded run cannot pass as an AI decision", async () => {
@@ -233,9 +250,12 @@ describe("risk and urgency are independent dimensions", () => {
   });
 
   it("moves urgency facts when the due date moves", () => {
+    // Offsets from the run's own "today", so this keeps testing that urgency
+    // tracks the due date however the demo clock is set.
     const scenario = scenarioById("s1_normal");
-    const soon = evidenceFor(withDueDate(scenario.document, "2026-08-30"), scenario.asOfDate);
-    const later = evidenceFor(withDueDate(scenario.document, "2026-12-01"), scenario.asOfDate);
+    const asOf = scenario.asOfDate;
+    const soon = evidenceFor(withDueDate(scenario.document, addDays(asOf, 1)), asOf);
+    const later = evidenceFor(withDueDate(scenario.document, addDays(asOf, 94)), asOf);
 
     expect(soon.urgency.daysUntilDue).toBe(1);
     expect(later.urgency.daysUntilDue).toBe(94);

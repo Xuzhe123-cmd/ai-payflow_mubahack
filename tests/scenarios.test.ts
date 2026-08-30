@@ -18,6 +18,7 @@ import { createRecordedEngine, type RecordedResponse } from "../lib/ai/recordedE
 import { SCENARIOS } from "../lib/demo/scenarios";
 import { runScenario } from "../lib/demo/runScenario";
 import { expectationFor } from "./expectations";
+import type { IsoDate, Scenario } from "../lib/types";
 
 const FIXTURE_DIR = resolve(process.cwd(), "tests/fixtures/llm");
 
@@ -30,6 +31,23 @@ function loadRecordings(): RecordedResponse[] {
 
 const recordings = loadRecordings();
 const recordedIds = new Set(recordings.map((entry) => entry.scenarioId));
+
+/**
+ * A recording is model output for a prompt that stated one specific TODAY, so
+ * it is only meaningful replayed against that date. `recordedAt` carries it, so
+ * the demo clock can move without silently invalidating what the model said —
+ * moving it would otherwise push the model's chosen date into the past and the
+ * guard would downgrade every recording, testing the guard instead of the model.
+ */
+function recordedAsOf(scenarioId: string): IsoDate {
+  const recording = recordings.find((entry) => entry.scenarioId === scenarioId);
+  return (recording?.recordedAt.slice(0, 10) ?? "") as IsoDate;
+}
+
+/** The scenario as it stood when the model was asked. */
+function asRecorded(scenario: Scenario): Scenario {
+  return { ...scenario, asOfDate: recordedAsOf(scenario.id) };
+}
 const missing = SCENARIOS.filter((scenario) => !recordedIds.has(scenario.id));
 
 if (recordings.length === 0) {
@@ -50,13 +68,22 @@ describe.skipIf(recordings.length === 0)("eight scenarios (replayed model decisi
     "$id decides correctly",
     async (scenario) => {
       const engine = createRecordedEngine(recordings, { keyFor: () => scenario.id });
-      const run = await runScenario(scenario, engine);
+      const run = await runScenario(asRecorded(scenario), engine);
       const expectation = expectationFor(scenario.id);
 
       // The model must have produced a usable decision — not been rescued by
       // the guard or quietly replaced by the fallback.
+      //
+      // The exception is a scenario that fails a deterministic safety check.
+      // There the guard is SUPPOSED to overrule whatever was recommended, and
+      // demanding an unaided model answer would be demanding the hole back.
       expect(run.decision.engine).toBe("LLM");
-      expect(run.decision.guard.downgraded, `guard downgraded: ${JSON.stringify(run.decision.guard.violations)}`).toBe(false);
+      if (!expectation.blocked) {
+        expect(
+          run.decision.guard.downgraded,
+          `guard downgraded: ${JSON.stringify(run.decision.guard.violations)}`,
+        ).toBe(false);
+      }
 
       // The AI's own choice, before any downstream layer touched it.
       expect(
@@ -73,7 +100,7 @@ describe.skipIf(recordings.length === 0)("eight scenarios (replayed model decisi
     const outcomes = new Set<string>();
     for (const scenario of SCENARIOS.filter((s) => recordedIds.has(s.id))) {
       const engine = createRecordedEngine(recordings, { keyFor: () => scenario.id });
-      const run = await runScenario(scenario, engine);
+      const run = await runScenario(asRecorded(scenario), engine);
       outcomes.add(run.finalOutcome);
     }
     // A pipeline that answered the same way every time would prove nothing.
@@ -83,7 +110,7 @@ describe.skipIf(recordings.length === 0)("eight scenarios (replayed model decisi
   it("explains its timing choice whenever it picks a payment date", async () => {
     for (const scenario of SCENARIOS.filter((s) => recordedIds.has(s.id))) {
       const engine = createRecordedEngine(recordings, { keyFor: () => scenario.id });
-      const run = await runScenario(scenario, engine);
+      const run = await runScenario(asRecorded(scenario), engine);
       if (run.decision.decision.recommendedDate) {
         expect(run.decision.decision.cashFlowExplanation.length).toBeGreaterThan(20);
         expect(run.decision.decision.reasons.length).toBeGreaterThan(0);

@@ -9,6 +9,7 @@
 module payflow::invoice;
 
 use std::string::String;
+use sui::dynamic_field as df;
 use payflow::treasury::{Self, TreasuryOwnerCap};
 
 const EWrongTreasury: u64 = 300;
@@ -21,6 +22,18 @@ const STATUS_SCHEDULED: u8 = 3;
 const STATUS_PAID: u8 = 4;
 const STATUS_REJECTED: u8 = 5;
 const STATUS_HUMAN_REVIEW: u8 = 6;
+/// Funds have left the vault into escrow, but the supplier does not have them.
+/// Deliberately NOT `PAID`: the invoice is not settled until the escrow is
+/// released, and calling it paid here would be a lie the audit trail keeps.
+const STATUS_ESCROWED: u8 = 7;
+
+/// Key for the dynamic field marking an invoice as settling through escrow.
+///
+/// A dynamic field rather than a struct field because `Invoice` is already
+/// deployed and its layout cannot change. It also happens to be the better
+/// design: the condition travels with the invoice, so every code path that
+/// already holds an `&Invoice` can see it without gaining a parameter.
+public struct ShipmentRequired has copy, drop, store {}
 
 public struct Invoice has key {
     id: UID,
@@ -83,6 +96,33 @@ public fun set_status(invoice: &mut Invoice, cap: &TreasuryOwnerCap, status: u8)
     invoice.status = status;
 }
 
+/// Marks this invoice as settling only against a confirmed shipment.
+///
+/// Admin-only. The agent cannot set this, and — far more importantly — cannot
+/// clear it: there is no removal function in this module at all, so a condition
+/// once attached is permanent for the life of the invoice.
+public fun require_shipment_confirmation(invoice: &mut Invoice, cap: &TreasuryOwnerCap) {
+    assert_owner(invoice, cap);
+    assert!(invoice.status != STATUS_PAID, EAlreadyPaid);
+    if (!df::exists(&invoice.id, ShipmentRequired {})) {
+        df::add(&mut invoice.id, ShipmentRequired {}, true);
+    }
+}
+
+/// Whether this invoice carries a settlement condition.
+///
+/// `payment::settle` consults this and refuses, which is what keeps the direct
+/// paths — agent, human-approved and scheduled alike — out of a conditional
+/// invoice.
+public fun requires_shipment(invoice: &Invoice): bool {
+    df::exists(&invoice.id, ShipmentRequired {})
+}
+
+/// Called only from `escrow`, when funds move from the vault into escrow.
+public(package) fun mark_escrowed(invoice: &mut Invoice) {
+    invoice.status = STATUS_ESCROWED;
+}
+
 public fun attach_blob(invoice: &mut Invoice, cap: &TreasuryOwnerCap, blob_id: String) {
     assert_owner(invoice, cap);
     invoice.walrus_blob_id = option::some(blob_id);
@@ -132,3 +172,7 @@ public fun status_paid(): u8 { STATUS_PAID }
 public fun status_rejected(): u8 { STATUS_REJECTED }
 
 public fun status_human_review(): u8 { STATUS_HUMAN_REVIEW }
+
+public fun status_escrowed(): u8 { STATUS_ESCROWED }
+
+public fun is_escrowed(invoice: &Invoice): bool { invoice.status == STATUS_ESCROWED }

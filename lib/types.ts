@@ -316,7 +316,9 @@ export type GuardViolationCode =
   | "MISSING_RECOMMENDED_DATE"
   | "DATE_NOT_IN_CANDIDATE_SET"
   | "EMPTY_REASONS"
-  | "TRANSPORT_ERROR";
+  | "TRANSPORT_ERROR"
+  /** A deterministic safety condition the model does not get a vote on. */
+  | "BLOCKING_CONDITION";
 
 export interface GuardViolation {
   code: GuardViolationCode;

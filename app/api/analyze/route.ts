@@ -9,6 +9,8 @@
 
 import { NextResponse } from "next/server";
 
+import { resolveInvoiceSource } from "@/lib/demo/invoiceSource";
+
 import { selectDecisionEngine } from "@/lib/ai/engine";
 import { createRecordedEngine } from "@/lib/ai/recordedEngine";
 import {
@@ -53,12 +55,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "scenarioId (string) is required." }, { status: 400 });
   }
 
-  let scenario;
-  try {
-    scenario = scenarioById(scenarioId);
-  } catch {
-    return NextResponse.json({ error: `Unknown scenario: ${scenarioId}` }, { status: 404 });
+  // A scenario, or a conditional invoice created on chain after the seed. Both
+  // resolve to a document, a world and an as-of date; nothing downstream needs
+  // to know which kind it got.
+  const source = resolveInvoiceSource(scenarioId);
+  if (!source) {
+    return NextResponse.json({ error: `Unknown invoice: ${scenarioId}` }, { status: 404 });
   }
+  const scenario = {
+    id: source.id,
+    name: source.scenarioName,
+    description: source.description,
+    document: source.document,
+    world: source.world,
+    asOfDate: source.asOf,
+  };
 
   // Replay is opt-in only. A failed live call still escalates to the safety
   // fallback rather than quietly borrowing a recording.

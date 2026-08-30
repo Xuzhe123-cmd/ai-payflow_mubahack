@@ -12,6 +12,7 @@
  * own fields are the truth, and where the two disagree the chain is right.
  */
 
+import { structTypesFor } from "./deployment";
 import type { DeploymentManifest } from "./deployment";
 import type { ChainQueries } from "./client";
 import {
@@ -39,6 +40,7 @@ import {
   readU64,
 } from "./decode";
 import { unitsToCents } from "./units";
+import { DEMO_CLOCK_MS } from "../demo/clock";
 
 export class ChainReadError extends Error {
   constructor(what: string, detail: string) {
@@ -111,7 +113,9 @@ export async function readTreasury(
 export async function readAgent(
   queries: ChainQueries,
   manifest: DeploymentManifest,
-  now = Date.now(),
+  // Demo clock by default: which day it is decides whether the chain's
+  // `spent_today` still counts, and that must not depend on the host machine.
+  now: number = DEMO_CLOCK_MS,
 ): Promise<ChainAgent | null> {
   const capObjectId = manifest.objects.agentCapId;
   const treasuryFields = requireFields(
@@ -155,6 +159,79 @@ function effectiveSpentCents(auth: Record<string, unknown>, now: number): number
   return readCents(auth, "spent_today") ?? 0;
 }
 
+/**
+ * Every Invoice object the deployment has, discovered from the chain.
+ *
+ * Not read from the manifest. The manifest records what a seed script created,
+ * and invoices created afterwards — the conditional pair, for instance — are
+ * absent from it. An invoice that exists on chain and belongs to this treasury
+ * belongs in the list, whoever made it and whenever.
+ *
+ * Falls back to the manifest's known ids when the type query is unavailable, so
+ * a GraphQL outage degrades to the old behaviour rather than to an empty list.
+ */
+export async function discoverInvoices(
+  queries: ChainQueries,
+  manifest: DeploymentManifest,
+  graphqlUrl: string,
+): Promise<ChainInvoice[]> {
+  // The type's address is the package version that DEFINED the module, which
+  // is not necessarily the version being called. Getting this wrong after an
+  // upgrade returns an empty set rather than an error.
+  const invoiceType = structTypesFor(manifest).invoice;
+  let ids: string[] = [];
+
+  try {
+    const response = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `{ objects(filter: {type: "${invoiceType}"}) { nodes { address } } }`,
+      }),
+    });
+    if (response.ok) {
+      const body = (await response.json()) as {
+        data?: { objects?: { nodes?: { address?: string }[] } };
+      };
+      ids = (body.data?.objects?.nodes ?? [])
+        .map((node) => node.address)
+        .filter((address): address is string => typeof address === "string");
+    }
+  } catch {
+    // Handled by the fallback below.
+  }
+
+  if (ids.length === 0) {
+    ids = [
+      ...(manifest.seed?.invoices ?? []),
+      ...(manifest.escrowDemo?.invoices ?? []),
+    ].map((invoice) => invoice.objectId);
+  }
+  if (ids.length === 0) return [];
+
+  const payloads = await queries.multiGetObjectFields(ids);
+  return payloads
+    .map((payload, index) => {
+      const fields = extractFields(payload);
+      const invoiceNumber = readString(fields, "invoice_number");
+      if (!invoiceNumber) return null;
+      return {
+        objectId: ids[index] ?? "",
+        invoiceNumber,
+        supplierId: readString(fields, "supplier_id") ?? "",
+        amountCents: unitsToCents(readU64(fields, "amount") ?? BigInt(0)),
+        currency: readString(fields, "currency") ?? "USD",
+        dueDate: readString(fields, "due_date") ?? "",
+        poNumber: readString(fields, "po_number") ?? "",
+        recipient: readString(fields, "recipient") ?? "",
+        status: invoiceStatusFrom(Number(readU64(fields, "status") ?? BigInt(0))),
+        walrusBlobId: readOptionString(fields, "walrus_blob_id"),
+      } satisfies ChainInvoice;
+    })
+    .filter((invoice): invoice is ChainInvoice => invoice !== null)
+    .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+}
+
 // --- Suppliers -----------------------------------------------------------------
 
 export async function readSuppliers(
@@ -196,7 +273,13 @@ export async function readInvoices(
   queries: ChainQueries,
   manifest: DeploymentManifest,
 ): Promise<ChainInvoice[]> {
-  const ids = (manifest.seed?.invoices ?? []).map((invoice) => invoice.objectId);
+  // Both lists: the original seed AND the conditional escrow demo. Reading
+  // only the first left the two conditional invoices invisible to every guard
+  // and to the interface, which reported them as "could not be read".
+  const ids = [
+    ...(manifest.seed?.invoices ?? []),
+    ...(manifest.escrowDemo?.invoices ?? []),
+  ].map((invoice) => invoice.objectId);
   if (ids.length === 0) return [];
 
   const payloads = await queries.multiGetObjectFields(ids);

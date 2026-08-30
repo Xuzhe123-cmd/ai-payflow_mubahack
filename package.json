@@ -19,7 +19,12 @@
     "move:test": "sui move test --path move/payflow",
     "deploy": "tsx scripts/deploy.ts",
     "seed": "tsx scripts/seed.ts",
-    "verify:deployment": "tsx scripts/verifyDeployment.ts"
+    "verify:deployment": "tsx scripts/verifyDeployment.ts",
+    "upgrade": "tsx scripts/upgrade.ts",
+    "seed:escrow": "tsx scripts/seedEscrowDemo.ts",
+    "escrow:preflight": "tsx scripts/escrowPreflight.ts",
+    "demo:a": "tsx scripts/demoA.ts",
+    "demo:b": "tsx scripts/demoB.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

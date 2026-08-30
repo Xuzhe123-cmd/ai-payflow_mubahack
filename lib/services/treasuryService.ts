@@ -39,6 +39,11 @@ export interface TreasuryView {
   projection: CashProjection;
   upcomingInflows: CashFlowEvent[];
   upcomingOutflows: CashFlowEvent[];
+  /**
+   * Registry counts, for the oracle panel. Kept here rather than counted in a
+   * component so the interface reports figures it was given.
+   */
+  suppliers: { total: number; approved: number };
 }
 
 export function buildTreasuryView(
@@ -78,6 +83,11 @@ export function buildTreasuryView(
     dailySpentCents: world.capability.dailySpentCents,
     dailyLimitCents: world.capability.dailyLimitCents,
     projection,
+    suppliers: {
+      total: world.suppliers.length,
+      approved: world.suppliers.filter((supplier) => supplier.registryStatus === "APPROVED")
+        .length,
+    },
     upcomingInflows: upcoming.filter((event) => event.direction === "INFLOW"),
     upcomingOutflows: upcoming.filter((event) => event.direction === "OUTFLOW"),
   };

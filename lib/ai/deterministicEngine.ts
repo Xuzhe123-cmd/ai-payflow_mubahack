@@ -25,34 +25,9 @@ import type {
   TreasuryDecisionEngine,
 } from "../types";
 import { formatMoneyRounded } from "../util/money";
+import { blockingConditions } from "./blockingConditions";
 
 const money = (cents: number) => formatMoneyRounded(cents);
-
-/** Reasons the chain would refuse this outright, whatever anyone recommends. */
-function blockingReasons(analysis: Readonly<DeterministicAnalysis>): string[] {
-  const { supplierFacts: sup, validationFacts: val, invoiceFacts: inv } = analysis;
-  const reasons: string[] = [];
-
-  if (!sup.supplierFound) {
-    reasons.push(`"${inv.supplierName}" is not in the approved supplier registry.`);
-  } else if (sup.registryStatus !== "APPROVED") {
-    reasons.push(`Supplier ${sup.supplierId} has registry status ${sup.registryStatus}.`);
-  } else if (!sup.walletMatch) {
-    // Only meaningful once we know who the supplier is supposed to be.
-    reasons.push(
-      "The remit wallet does not match the address registered for this supplier.",
-    );
-  }
-
-  if (val.isDuplicate) {
-    reasons.push(`Invoice ${inv.invoiceNumber} has already been settled on chain.`);
-  }
-  if (!val.currencyAllowed) {
-    reasons.push(`${inv.currency || "(none)"} is not a permitted settlement currency.`);
-  }
-
-  return reasons;
-}
 
 /** The first candidate date the chain would accept on reserve grounds. */
 function firstAcceptable(analysis: Readonly<DeterministicAnalysis>): CashFlowScenario | null {
@@ -63,7 +38,7 @@ export function decideDeterministically(
   analysis: Readonly<DeterministicAnalysis>,
 ): TreasuryDecision {
   const { policyFacts: pol, invoiceFacts: inv, urgencyFacts: urg } = analysis;
-  const blocking = blockingReasons(analysis);
+  const blocking = blockingConditions(analysis);
   const today = analysis.cashFlowScenarios[0] ?? null;
   const acceptable = firstAcceptable(analysis);
 

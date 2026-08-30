@@ -13,6 +13,8 @@ import { ConnectInboxCard } from "@/components/dashboard/ConnectInboxCard";
 import { CashFlowCard } from "@/components/dashboard/CashFlowCard";
 import { AIInsightCard } from "@/components/dashboard/AIInsightCard";
 import { AgentStatusCard } from "@/components/dashboard/AgentStatusCard";
+import { OracleCard } from "@/components/dashboard/OracleCard";
+import { PipelineStrip } from "@/components/dashboard/PipelineStrip";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
 import { usePayflow } from "@/components/providers/PayflowProvider";
 import {
@@ -22,6 +24,7 @@ import {
   useInvoiceStats,
 } from "@/components/hooks/usePayflowSelectors";
 import { formatMoneyRounded, greeting } from "@/lib/format";
+import { buildTreasuryOracleFeed } from "@/lib/oracle/feed";
 
 export default function DashboardPage() {
   const { state } = usePayflow();
@@ -32,6 +35,18 @@ export default function DashboardPage() {
 
   const connected = state.inboxStatus === "CONNECTED";
   const operatorName = state.session?.operatorName ?? "";
+
+  // Derived in lib/oracle, not here — components report figures, they do not
+  // compute them.
+  const oracleFeed = buildTreasuryOracleFeed({
+    inflowCount: view.upcomingInflows.length,
+    outflowCount: view.upcomingOutflows.length,
+    horizonDays: view.projection.horizonDays,
+    supplierCount: view.suppliers.total,
+    approvedSupplierCount: view.suppliers.approved,
+    invoiceCount: entries.length,
+    settledInvoiceCount: stats.paid,
+  });
 
   return (
     <PageContainer>
@@ -52,6 +67,10 @@ export default function DashboardPage() {
           ) : null
         }
       />
+
+      {/* Oracle → AI → Guard → Sui, above the numbers, so the architecture is
+          read before the figures it produced. */}
+      <PipelineStrip className="mb-5" />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
@@ -125,6 +144,11 @@ export default function DashboardPage() {
             />
             <AgentStatusCard />
           </div>
+
+          <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_352px]">
+            <OracleCard feed={oracleFeed} />
+            <div className="hidden xl:block" />
+          </section>
 
           <section className="mt-8">
             <SectionTitle

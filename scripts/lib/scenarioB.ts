@@ -29,7 +29,15 @@ export type ScenarioBVerdict =
   /** Refused, but by a different check — the demo would be misleading. */
   | { kind: "REJECTED_OTHER"; code: number; violation: PolicyViolationCode | null }
   /** Refused by code 5 somewhere that is not our payment path. */
-  | { kind: "REJECTED_ELSEWHERE"; code: number; module: string | null; functionName: string | null }
+  | {
+      kind: "REJECTED_ELSEWHERE";
+      code: number;
+      module: string | null;
+      functionName: string | null;
+      /** Where it actually came from, and where it was expected from. */
+      address: string | null;
+      expectedAddress: string;
+    }
   /** Refused, but the reason could not be read. Never counts as a pass. */
   | { kind: "UNPARSED"; error: string };
 
@@ -79,6 +87,8 @@ export function classifyScenarioB(input: ScenarioBInput): ScenarioBVerdict {
       code: abort.code,
       module: abort.module,
       functionName: abort.functionName,
+      address: abort.address,
+      expectedAddress: input.expectedPackageId,
     };
   }
 
@@ -141,11 +151,21 @@ export function describeVerdict(verdict: ScenarioBVerdict): string {
         `abort ${verdict.code} (${verdict.violation ?? "not a policy check"}) — ` +
         `rejected, but not by the payment cap; the seed data is masking the demo`
       );
-    case "REJECTED_ELSEWHERE":
-      return (
-        `abort ${verdict.code} came from ${verdict.module ?? "?"}::${verdict.functionName ?? "?"}, ` +
-        `not ${EXPECTED_MODULE}::${EXPECTED_FUNCTION}`
-      );
+    case "REJECTED_ELSEWHERE": {
+      // The module and function are frequently identical on both sides, because
+      // the mismatch is the PACKAGE — which is exactly what an upgrade changes.
+      // Printing the same string twice made that failure unreadable, so the
+      // differing part is named explicitly.
+      const from = `${verdict.module ?? "?"}::${verdict.functionName ?? "?"}`;
+      const expected = `${EXPECTED_MODULE}::${EXPECTED_FUNCTION}`;
+      if (from === expected && verdict.address) {
+        return (
+          `abort ${verdict.code} came from ${expected} in package ${verdict.address}, ` +
+          `but ${verdict.expectedAddress} was expected`
+        );
+      }
+      return `abort ${verdict.code} came from ${from}, not ${expected}`;
+    }
     case "UNPARSED":
       return `could not read the failure reason: ${verdict.error.slice(0, 200)}`;
   }

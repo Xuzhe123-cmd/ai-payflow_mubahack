@@ -48,6 +48,9 @@ const CHECK_COUNT: u64 = 10;
 const EWrongTreasury: u64 = 700;
 const EApprovalMismatch: u64 = 701;
 const ERequestNotPending: u64 = 702;
+/// This invoice settles only against a confirmed shipment, so it cannot be paid
+/// from here. `escrow::execute_conditional` is the only way through.
+const EConditionalInvoice: u64 = 703;
 
 const REQUEST_PENDING: u8 = 0;
 const REQUEST_EXECUTED: u8 = 1;
@@ -330,7 +333,49 @@ public fun execute_approved<T>(
 
 /// Effects, in one transaction: move the coin, bump the counters, mark the
 /// invoice, freeze a record. Private, and reached only after `assert!(approved)`.
+///
+/// THE CONDITIONAL GATE lives here, at the one point all three entry points
+/// pass through. An invoice that settles only against a confirmed shipment
+/// cannot be paid by the agent, by an approver, or by a scheduled request —
+/// none of them can reach a transfer without coming through this function, and
+/// this function refuses. That is why the rule needed no change to any existing
+/// signature: it is enforced below every caller rather than beside them.
 fun settle<T>(
+    treasury: &mut Treasury<T>,
+    inv: &mut Invoice,
+    amount: u64,
+    recipient: address,
+    recommendation_id: String,
+    agent_cap_id: Option<ID>,
+    authority: u8,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(!invoice::requires_shipment(inv), EConditionalInvoice);
+
+    let funds = treasury::split_vault(treasury, amount, ctx);
+    transfer::public_transfer(funds, recipient);
+
+    record_settlement(
+        treasury,
+        inv,
+        amount,
+        recipient,
+        recommendation_id,
+        agent_cap_id,
+        authority,
+        clock,
+        ctx,
+    );
+}
+
+/// The bookkeeping half of a settlement: counters, invoice status, the frozen
+/// record, the event. Everything except moving the coin.
+///
+/// Split out so `escrow` can complete a release without this module needing to
+/// know escrow exists — the dependency runs escrow -> payment and never back,
+/// which is what keeps the two modules acyclic.
+public(package) fun record_settlement<T>(
     treasury: &mut Treasury<T>,
     inv: &mut Invoice,
     amount: u64,
@@ -345,9 +390,6 @@ fun settle<T>(
     let treasury_id = object::id(treasury);
     let invoice_number = invoice::invoice_number(inv);
 
-    let funds = treasury::split_vault(treasury, amount, ctx);
-    transfer::public_transfer(funds, recipient);
-
     if (agent_cap_id.is_some()) {
         treasury::record_agent_spend(treasury, *agent_cap_id.borrow(), amount, now);
     };
@@ -358,7 +400,9 @@ fun settle<T>(
     let uid = object::new(ctx);
     let record_id = object::uid_to_inner(&uid);
     // Written in the SAME transaction as the transfer, which is what makes a
-    // replay impossible rather than merely unlikely.
+    // replay impossible rather than merely unlikely. For an escrow release the
+    // number was already claimed at lock time; this re-points that entry at the
+    // record, which is why the ledger write is idempotent on the key.
     treasury::mark_invoice_paid(treasury, invoice_number, record_id);
 
     event::emit(PaymentExecuted {

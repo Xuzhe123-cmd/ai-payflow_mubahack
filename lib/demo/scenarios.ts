@@ -22,9 +22,14 @@ import { PURCHASE_ORDERS } from "./purchaseOrders";
 import { PAYMENT_HISTORY } from "./paymentHistory";
 import { TREASURY_PROFILES, type TreasuryProfile } from "./cashFlow";
 import { AGENT_CAPABILITY, APPROVER_AUTHORITY, TREASURY_POLICY } from "./policies";
+import { DEMO_AS_OF_DATE } from "./clock";
 
-/** Every scenario shares one "today" so the fixtures stay comparable. */
-export const DEMO_AS_OF_DATE = "2026-08-29";
+/**
+ * Every scenario shares one "today" so the fixtures stay comparable. Demo day
+ * is written down once, in ./clock, and re-exported here for the callers that
+ * have always imported it from this module.
+ */
+export { DEMO_AS_OF_DATE };
 
 function world(profile: TreasuryProfile): WorldSnapshot {
   return {

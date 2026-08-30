@@ -24,11 +24,19 @@ import {
   describeA0Verdict,
   describeVerdict,
 } from "./lib/scenarioB";
+import {
+  AUTHORITY_AGENT,
+  describeA0Proof,
+  describeProofPackage,
+  verifyA0Proof,
+} from "./lib/a0Proof";
 import { centsToUnitsString, unitsToCents } from "../lib/sui/units";
 import {
+  callPackageId,
   explorerTxUrl,
   isDeploymentManifest,
   manifestPath,
+  typePackageId,
   type DeploymentManifest,
 } from "../lib/sui/deployment";
 import * as sui from "./lib/suiCli";
@@ -168,66 +176,86 @@ async function main(): Promise<void> {
   if (!demoA0) {
     check("$3,000 invoice present", false, "seed it before running this check");
   } else {
-    const now = Date.now();
     const recipient = await recipientFor(manifest, demoA0.supplierId);
-    const options = {
-      packageId: manifest.packageId,
-      module: "payment",
-      function: "execute_payment",
-      typeArgs: [manifest.coinType],
-      args: [
-        manifest.objects.treasuryId,
-        manifest.objects.agentCapId,
-        manifest.objects.supplierRegistryId,
-        demoA0.objectId,
-        centsToUnitsString(demoA0.amountCents),
-        String(recipient),
-        "rec_demo_a0",
-        String(now),
-        String(now + 86_400_000),
-        "0x6",
-      ],
-    };
+    const agentCapCents = manifest.initialPolicy.maxAgentPaymentCents;
 
     console.log(`  invoice            ${demoA0.invoiceNumber} (${money(demoA0.amountCents)})`);
-    console.log(`  agent cap          ${money(manifest.initialPolicy.maxAgentPaymentCents)}`);
+    console.log(`  agent cap          ${money(agentCapCents)}`);
     console.log(`  supplier           ${demoA0.supplierId} -> ${recipient}`);
 
-    const executeA0 = process.argv.includes("--demo-a0");
-    let a0Verdict;
+    // The live status decides HOW this is verified. A0 settles the invoice, and
+    // a settled invoice can never be settled again — so once the proof exists,
+    // re-attempting the payment tests replay protection rather than A0.
+    const invoiceStatus = readInvoiceStatus(demoA0.objectId);
 
-    if (executeA0) {
-      console.log("  mode               REAL transaction — this one is expected to SUCCEED");
-      const outcome = sui.callAllowingAbort(options);
-      if (outcome.digest) {
-        const onChain = sui.fetchTransaction(outcome.digest);
-        console.log(`  transaction        ${outcome.digest}`);
-        console.log(`  on-chain status    ${onChain.status ?? "unknown"}`);
-        if (onChain.exists) {
-          console.log(`  checkpoint         ${onChain.checkpoint ?? "(pending)"}`);
-          console.log(`  explorer           ${explorerTxUrl(outcome.digest, network)}`);
-        }
-      }
-      a0Verdict = classifyScenarioA0({
-        succeeded: outcome.ok,
-        abort: outcome.abort,
-        error: outcome.error || outcome.raw,
+    if (invoiceStatus === "PAID") {
+      await verifyExistingA0Proof({
+        manifest,
+        network,
+        invoiceObjectId: demoA0.objectId,
+        invoiceStatus,
+        agentCapCents,
+        registeredRecipient: recipient,
       });
     } else {
-      console.log("  mode               dry run (no gas, no state change)");
-      const result = sui.dryRunCall(options);
-      a0Verdict = classifyScenarioA0(
-        result.ok
-          ? { succeeded: true, abort: null, error: "" }
-          : { succeeded: false, abort: result.abort, error: result.error },
+      // A fresh deployment, where the payment has not been made yet.
+      const now = Date.now();
+      const options = {
+        packageId: callPackageId(manifest),
+        module: "payment",
+        function: "execute_payment",
+        typeArgs: [manifest.coinType],
+        args: [
+          manifest.objects.treasuryId,
+          manifest.objects.agentCapId,
+          manifest.objects.supplierRegistryId,
+          demoA0.objectId,
+          centsToUnitsString(demoA0.amountCents),
+          String(recipient),
+          "rec_demo_a0",
+          String(now),
+          String(now + 86_400_000),
+          "0x6",
+        ],
+      };
+
+      const executeA0 = process.argv.includes("--demo-a0");
+      let a0Verdict;
+
+      if (executeA0) {
+        console.log("  mode               REAL transaction — this one is expected to SUCCEED");
+        const outcome = sui.callAllowingAbort(options);
+        if (outcome.digest) {
+          const onChain = sui.fetchTransaction(outcome.digest);
+          console.log(`  transaction        ${outcome.digest}`);
+          console.log(`  on-chain status    ${onChain.status ?? "unknown"}`);
+          if (onChain.exists) {
+            console.log(`  checkpoint         ${onChain.checkpoint ?? "(pending)"}`);
+            console.log(`  explorer           ${explorerTxUrl(outcome.digest, network)}`);
+          }
+        }
+        a0Verdict = classifyScenarioA0({
+          succeeded: outcome.ok,
+          abort: outcome.abort,
+          error: outcome.error || outcome.raw,
+        });
+      } else {
+        console.log(`  invoice status     ${invoiceStatus ?? "unknown"} (not yet settled)`);
+        console.log("  mode               dry run (no gas, no state change)");
+        const result = sui.dryRunCall(options);
+        a0Verdict = classifyScenarioA0(
+          result.ok
+            ? { succeeded: true, abort: null, error: "" }
+            : { succeeded: false, abort: result.abort, error: result.error },
+        );
+      }
+
+      check(
+        "accepted by every on-chain check",
+        a0Verdict.kind === "EXECUTED_AUTONOMOUSLY",
+        describeA0Verdict(a0Verdict),
       );
     }
-
-    check(
-      "accepted by every on-chain check",
-      a0Verdict.kind === "EXECUTED_AUTONOMOUSLY",
-      describeA0Verdict(a0Verdict),
-    );
   }
 
   heading("Scenario B — AI cannot override Sui");
@@ -237,7 +265,7 @@ async function main(): Promise<void> {
   } else {
     const now = Date.now();
     const options = {
-      packageId: manifest.packageId,
+      packageId: callPackageId(manifest),
       module: "payment",
       function: "execute_payment",
       typeArgs: [manifest.coinType],
@@ -308,7 +336,7 @@ async function main(): Promise<void> {
         succeeded: outcome.ok,
         abort: outcome.abort,
         error: outcome.error || outcome.raw,
-        expectedPackageId: manifest.packageId,
+        expectedPackageId: callPackageId(manifest),
       });
     } else {
       console.log("  mode               dry run (no gas, no state change)");
@@ -318,13 +346,13 @@ async function main(): Promise<void> {
             succeeded: true,
             abort: null,
             error: "",
-            expectedPackageId: manifest.packageId,
+            expectedPackageId: callPackageId(manifest),
           })
         : classifyScenarioB({
             succeeded: false,
             abort: result.abort,
             error: result.error,
-            expectedPackageId: manifest.packageId,
+            expectedPackageId: callPackageId(manifest),
           });
     }
 
@@ -349,6 +377,130 @@ async function main(): Promise<void> {
 }
 
 /** The wallet the registry holds for a supplier — the only address that passes check 4. */
+/** Live invoice status, decoded from the chain's numeric field. */
+function readInvoiceStatus(invoiceObjectId: string): string | null {
+  const fields = sui.objectFields(invoiceObjectId);
+  const raw = fields.status;
+  if (raw === undefined || raw === null) return null;
+  const value = Number(raw);
+  const names = [
+    "PENDING",
+    "ANALYZING",
+    "APPROVED",
+    "SCHEDULED",
+    "PAID",
+    "REJECTED",
+    "HUMAN_REVIEW",
+    "ESCROWED",
+  ];
+  return names[value] ?? `UNKNOWN(${value})`;
+}
+
+/**
+ * Verifies A0 from the settlement that already happened.
+ *
+ * The invoice is PAID, so the payment cannot be repeated — check 8 exists
+ * precisely to stop that. What is checked instead is the recorded proof, and it
+ * is checked hard: the transaction must exist and have succeeded, and the frozen
+ * PaymentRecord it created must agree with the claim on invoice number, amount,
+ * recipient, supplier and — the part that makes it A0 rather than merely a
+ * payment — the AGENT authority.
+ */
+async function verifyExistingA0Proof(input: {
+  manifest: DeploymentManifest;
+  network: string;
+  invoiceObjectId: string;
+  invoiceStatus: string;
+  agentCapCents: number;
+  registeredRecipient: string;
+}): Promise<void> {
+  const { manifest, invoiceObjectId, invoiceStatus, agentCapCents, registeredRecipient } = input;
+  const claim = manifest.proofs?.a0 ?? null;
+
+  console.log("  invoice status     PAID — settled by a previous transaction");
+  console.log("  mode               EXISTING ON-CHAIN PROOF");
+
+  if (!claim) {
+    check(
+      "accepted by every on-chain check",
+      false,
+      describeA0Proof(
+        verifyA0Proof({
+          claim: null,
+          transaction: null,
+          record: null,
+          invoiceStatus,
+          agentCapCents,
+          registeredRecipient,
+        }),
+      ),
+    );
+    return;
+  }
+
+  console.log(`  transaction        ${claim.digest}`);
+
+  const transaction = sui.fetchTransaction(claim.digest);
+  console.log(`  on-chain status    ${transaction.status ?? "not found"}`);
+  if (transaction.exists) {
+    console.log(`  checkpoint         ${transaction.checkpoint ?? "(pending)"}`);
+    console.log(`  explorer           ${explorerTxUrl(claim.digest, input.network as never)}`);
+  }
+
+  // The proof ran against whichever package was current at the time. After an
+  // upgrade that is the ORIGINAL, and that is correct rather than stale.
+  console.log(
+    `  proof package      ${claim.packageId.slice(0, 12)}… — ` +
+      describeProofPackage(claim.packageId, callPackageId(manifest), typePackageId(manifest)),
+  );
+  console.log(`  payment record     ${claim.paymentRecordId}`);
+
+  const recordFields = sui.objectFields(claim.paymentRecordId);
+  const record =
+    Object.keys(recordFields).length > 0
+      ? {
+          invoiceNumber: String(recordFields.invoice_number ?? ""),
+          amountCents: unitsToCents(BigInt(String(recordFields.amount ?? "0"))),
+          recipient: String(recordFields.recipient ?? ""),
+          supplierId: String(recordFields.supplier_id ?? ""),
+          // The CLI renders a u8 as "0.0"; take the integer part.
+          authority: Number.parseInt(String(recordFields.authority ?? "-1"), 10),
+          packageId: null,
+        }
+      : null;
+
+  if (record) {
+    console.log(`  record amount      ${money(record.amountCents)}`);
+    console.log(
+      `  record authority   ${record.authority} ` +
+        `(${record.authority === AUTHORITY_AGENT ? "AGENT — autonomous" : "NOT the agent"})`,
+    );
+  }
+
+  const verdict = verifyA0Proof({
+    claim,
+    transaction: { exists: transaction.exists, status: transaction.status },
+    record,
+    invoiceStatus,
+    agentCapCents,
+    registeredRecipient,
+  });
+
+  // Cross-check that the proof points at the invoice this check is about.
+  const sameInvoice = claim.invoiceObjectId === invoiceObjectId;
+  check(
+    "proof refers to this invoice object",
+    sameInvoice,
+    sameInvoice ? claim.invoiceObjectId : `proof names ${claim.invoiceObjectId}`,
+  );
+
+  check(
+    "accepted by every on-chain check",
+    verdict.kind === "PROVEN",
+    describeA0Proof(verdict),
+  );
+}
+
 async function recipientFor(manifest: DeploymentManifest, supplierId: string): Promise<string> {
   const { SUPPLIERS } = await import("../lib/demo/suppliers");
   const supplier = SUPPLIERS.find((entry) => entry.id === supplierId);

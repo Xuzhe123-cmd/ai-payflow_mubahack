@@ -9,6 +9,7 @@ import {
   Building03Icon,
   InvoiceIcon,
   Logout03Icon,
+  PackageDeliveredIcon,
   Robot01Icon,
   Settings02Icon,
   Shield01Icon,
@@ -27,6 +28,7 @@ const PRIMARY_NAV = [
   { href: "/payments", label: "Payments", icon: Blockchain01Icon },
   { href: "/suppliers", label: "Suppliers", icon: Building03Icon },
   { href: "/activity", label: "Activity", icon: Time04Icon },
+  { href: "/escrow", label: "Escrow", icon: PackageDeliveredIcon },
 ];
 
 const SECONDARY_NAV = [

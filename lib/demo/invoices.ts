@@ -61,9 +61,9 @@ INVOICE
 
 Invoice Number:    INV-2026-3461
 Issue Date:        2026-08-25
-Due Date:          2026-09-05
+Due Date:          2026-09-20
 Purchase Order:    PO-2026-0470
-Payment Terms:     Net 11
+Payment Terms:     Net 26
 
 Description                                          Amount
 Sheet metal enclosures, run 12                    30,000.00
@@ -73,7 +73,7 @@ Total Due (USD)                                   30,000.00
 Remit to wallet: ${WALLETS.lumen}`,
 };
 
-/** Scenario 3 — early-payment discount expiring today. */
+/** Scenario 3 — early-payment discount still open, but closing soon. */
 export const DOC_DISCOUNT: RawInvoiceDocument = {
   id: "doc_discount",
   sourceRef: "email:AP/2026-08-24/00419",
@@ -88,14 +88,14 @@ Invoice Number:    INV-2026-3468
 Issue Date:        2026-08-24
 Due Date:          2026-09-23
 Purchase Order:    PO-2026-0511
-Payment Terms:     5/5 Net 30
+Payment Terms:     5/20 Net 30
 
 Description                                          Amount
 Powder coating line, phase 2                       4,800.00
                                                  ----------
 Total Due (USD)                                    4,800.00
 
-Early Payment Discount: 5% if paid by 2026-08-29
+Early Payment Discount: 5% if paid by 2026-09-13
 
 Remit to wallet: ${WALLETS.lumen}`,
 };
@@ -139,9 +139,9 @@ INVOICE
 
 Invoice Number:    INV-2026-3479
 Issue Date:        2026-08-26
-Due Date:          2026-09-07
+Due Date:          2026-09-12
 Purchase Order:    PO-2026-0481
-Payment Terms:     Net 12
+Payment Terms:     Net 17
 
 Description                                          Amount
 CNC tooling refurbishment                         19,500.00

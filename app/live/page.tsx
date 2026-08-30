@@ -13,6 +13,7 @@
 
 import LiveBoard from "@/components/live/LiveBoard";
 import { decideAll } from "@/lib/decision/engine";
+import { DEMO_AS_OF_DATE } from "@/lib/demo/clock";
 import type { DecisionBoard } from "@/lib/services/decisionService";
 import { readChainSnapshot } from "@/lib/sui/chainReader";
 import { createSuiQueries } from "@/lib/sui/client";
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
  * The seeded invoices carry fixed due dates, so the demo pins "today" rather
  * than letting every one of them drift into the past. Override with ?asOf=.
  */
-const DEFAULT_AS_OF = "2026-09-01";
+const DEFAULT_AS_OF = DEMO_AS_OF_DATE;
 
 export default async function LivePage({
   searchParams,

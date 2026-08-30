@@ -16,12 +16,20 @@ import type { DeterministicAnalysis } from "../lib/types";
 
 let analysis: Readonly<DeterministicAnalysis>;
 
+/**
+ * Pinned to the date the responses below were written against, not to the demo
+ * clock: "2026-09-01" is only a valid SCHEDULE candidate, and "2026-09-05" only
+ * a future one, relative to this "today". Moving demo day must not quietly turn
+ * these into a different set of assertions.
+ */
+const AS_OF = "2026-08-29";
+
 beforeAll(async () => {
   const scenario = scenarioById("s2_cashflow");
   analysis = await buildAnalysis({
     document: scenario.document,
     world: scenario.world,
-    asOf: scenario.asOfDate,
+    asOf: AS_OF,
   });
 });
 

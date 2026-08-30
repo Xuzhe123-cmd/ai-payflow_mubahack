@@ -18,9 +18,18 @@ import { PURCHASE_ORDERS } from "../lib/demo/purchaseOrders";
 import { SCENARIOS, scenarioById } from "../lib/demo/scenarios";
 import { SUPPLIERS } from "../lib/demo/suppliers";
 import { TREASURY_POLICY } from "../lib/demo/policies";
-import { addDays, daysBetween } from "../lib/util/date";
+import { addDays, compareDates, daysBetween } from "../lib/util/date";
 import { dollars, percentOf } from "../lib/util/money";
 
+/**
+ * The date the demo FIXTURES were authored around — the invoice due dates and
+ * the cash-flow calendar are all dated late August, so the liquidity shapes
+ * asserted below are properties of that data, not of demo day.
+ *
+ * Deliberately not DEMO_AS_OF_DATE: moving the demo clock must not silently
+ * rewrite what this suite checks. Demo-day behaviour is covered separately, in
+ * tests/demoClock.test.ts.
+ */
 const AS_OF = "2026-08-29";
 
 describe("money parsing", () => {
@@ -72,8 +81,8 @@ describe("extractInvoice", () => {
     expect(facts.discount).toEqual({
       percent: 5,
       amountCents: dollars(240),
-      deadline: "2026-08-29",
-      daysUntilDeadline: 0,
+      deadline: "2026-09-13",
+      daysUntilDeadline: 15,
     });
   });
 
@@ -190,18 +199,21 @@ describe("candidate date simulation", () => {
     const analysis = await buildAnalysis({
       document: scenario.document,
       world: scenario.world,
-      asOf: scenario.asOfDate,
+      asOf: AS_OF,
     });
 
     const byDate = new Map(analysis.cashFlowScenarios.map((c) => [c.paymentDate, c]));
-    expect([...byDate.keys()]).toEqual(["2026-08-29", "2026-09-01", "2026-09-05"]);
+    // today / the earliest reserve-safe date / the due date.
+    expect([...byDate.keys()]).toEqual(["2026-08-29", "2026-09-01", "2026-09-20"]);
 
+    // The shape that makes this a TIMING problem rather than an affordability
+    // one: paying today breaches the reserve, waiting three days does not.
     expect(byDate.get("2026-08-29")!.projectedMinimumCashCents).toBe(dollars(42_000));
     expect(byDate.get("2026-08-29")!.reserveBreach).toBe(true);
     expect(byDate.get("2026-09-01")!.projectedMinimumCashCents).toBe(dollars(65_000));
     expect(byDate.get("2026-09-01")!.reserveBreach).toBe(false);
-    expect(byDate.get("2026-09-05")!.projectedMinimumCashCents).toBe(dollars(70_000));
-    expect(byDate.get("2026-09-05")!.reserveBreach).toBe(false);
+    expect(byDate.get("2026-09-20")!.projectedMinimumCashCents).toBe(dollars(72_000));
+    expect(byDate.get("2026-09-20")!.reserveBreach).toBe(false);
   });
 
   it("prices the discount only on dates that capture it", async () => {
@@ -209,7 +221,9 @@ describe("candidate date simulation", () => {
     const analysis = await buildAnalysis({
       document: scenario.document,
       world: scenario.world,
-      asOf: scenario.asOfDate,
+      // The discount deadline is 2026-08-29, so this is the only date at which
+      // there is a discount to price at all.
+      asOf: AS_OF,
     });
 
     const today = analysis.cashFlowScenarios.find((c) => c.paymentDate === "2026-08-29")!;
@@ -221,15 +235,24 @@ describe("candidate date simulation", () => {
     expect(dueDate.paymentAmountCents).toBe(dollars(4_800));
   });
 
-  it("never offers a date after the due date", async () => {
+  it("never offers a date after the due date, unless the invoice is overdue", async () => {
+    // An overdue invoice has no date left that is not late — today is the only
+    // option and it is flagged as such. The rule being checked is that lateness
+    // is never CHOSEN: it appears only when the due date has already passed.
     for (const scenario of SCENARIOS) {
-      const analysis = await buildAnalysis({
-        document: scenario.document,
-        world: scenario.world,
-        asOf: scenario.asOfDate,
-      });
-      for (const candidate of analysis.cashFlowScenarios) {
-        expect(candidate.isAfterDueDate).toBe(false);
+      for (const asOf of [AS_OF, scenario.asOfDate]) {
+        const analysis = await buildAnalysis({
+          document: scenario.document,
+          world: scenario.world,
+          asOf,
+        });
+        const overdue = compareDates(analysis.invoiceFacts.dueDate, asOf) < 0;
+        for (const candidate of analysis.cashFlowScenarios) {
+          expect(
+            candidate.isAfterDueDate,
+            `${scenario.id} @ ${asOf}: ${candidate.paymentDate} vs due ${analysis.invoiceFacts.dueDate}`,
+          ).toBe(overdue);
+        }
       }
     }
   });

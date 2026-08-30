@@ -80,8 +80,87 @@ export interface InitialPolicy {
   maxRecommendationAgeMs: number;
 }
 
+/**
+ * What a package upgrade produced.
+ *
+ * Recorded ALONGSIDE the original publish rather than replacing it, because
+ * after an upgrade the two ids mean different things and both are needed. See
+ * `callPackageId` / `typePackageId` — confusing them is the classic way to
+ * break a working deployment.
+ */
+export interface UpgradeRecord {
+  /** The new package id. Move CALLS go here. */
+  packageId: string;
+  /** The id this upgrade replaced, for the audit trail. */
+  previousPackageId: string;
+  /** On-chain package version after the upgrade. The first publish is 1. */
+  version: number;
+  upgradeCapId: string;
+  upgradedAt: string;
+  digest: string;
+  /** Modules added by this upgrade, for the record. */
+  addedModules: string[];
+}
+
+/**
+ * A real settlement that already happened, kept as evidence.
+ *
+ * Recorded because a demo claim ages badly. "The agent can pay autonomously"
+ * was proven once, by a transaction, and the invoice it settled is now
+ * permanently PAID — so re-running the payment to re-prove it is impossible by
+ * construction. What the verifier does instead is check this record against the
+ * chain, which is a stronger statement anyway: not "it would work" but "it did".
+ *
+ * `packageId` is the version the call actually ran against. A proof made before
+ * an upgrade stays valid afterwards; the transaction is history, and history
+ * does not move to the new package.
+ */
+export interface PaymentProof {
+  /** Which demo claim this establishes. */
+  scenario: "A0";
+  invoiceNumber: string;
+  amountCents: Cents;
+  /** The real transaction digest. */
+  digest: string;
+  /** The package the call executed against, which may predate an upgrade. */
+  packageId: string;
+  module: string;
+  function: string;
+  /** The Invoice object the transaction settled. */
+  invoiceObjectId: string;
+  /** The frozen PaymentRecord it created — the cross-check that makes this
+   *  proof about OUR payment rather than about the invoice merely being paid. */
+  paymentRecordId: string;
+  supplierId: string;
+  recipient: string;
+  /** 0 = AGENT (autonomous), 1 = HUMAN_APPROVAL. A0 must be 0. */
+  authority: number;
+  executedAt: string;
+}
+
+/** Objects created after the escrow upgrade. Absent until they exist. */
+export interface EscrowDemoRecord {
+  createdAt: string;
+  /** Owned by the demo shipment oracle. */
+  oracleCapId: string;
+  oracleId: string;
+  /** The two conditional demo invoices. */
+  invoices: SeededInvoice[];
+  /** Escrow objects, once locked. */
+  escrowIds: string[];
+  /** Frozen attestations, once made. */
+  attestationIds: string[];
+}
+
 export interface DeploymentManifest {
   network: SuiNetwork;
+  /**
+   * The ORIGINAL published package id, and permanently so.
+   *
+   * Every object created before an upgrade carries a type anchored to this
+   * address — `Treasury`, `Invoice`, and the settlement coin all resolve here
+   * forever. Never overwrite it with an upgraded id.
+   */
   packageId: string;
   publishedAt: string;
   publisher: string;
@@ -93,6 +172,52 @@ export interface DeploymentManifest {
   initialPolicy: InitialPolicy;
   /** Absent until scripts/seed.ts has run. */
   seed?: SeedRecord;
+  /** Owned by the publisher. Required to upgrade the package. */
+  upgradeCapId?: string;
+  /** Absent until the package has been upgraded. Latest upgrade only. */
+  upgrade?: UpgradeRecord;
+  /** Absent until the escrow demo objects have been created. */
+  escrowDemo?: EscrowDemoRecord;
+  /** Real settlements already executed, kept as evidence rather than re-run. */
+  proofs?: { a0?: PaymentProof };
+  /**
+   * Module name -> the package version that first defined it.
+   *
+   * A Move type is addressed by the package version that DEFINED its module,
+   * not by the current one. Modules from the original publish keep the original
+   * address forever; a module introduced by an upgrade is addressed at that
+   * upgrade's package and stays there through later upgrades too.
+   *
+   * Verified on testnet after the escrow upgrade: `AgentCap` still reads
+   * `<v1>::agent::AgentCap` while the newly added `OracleCap` reads
+   * `<v2>::oracle::OracleCap`. Anything absent here belongs to the original
+   * publish.
+   */
+  moduleOrigins?: Record<string, string>;
+}
+
+/**
+ * Where to send a Move CALL: the newest package version.
+ *
+ * An upgrade publishes a new id, and only that id has the new modules. Calling
+ * the original after an upgrade reaches the old code, which is occasionally
+ * what you want and almost never what you meant.
+ */
+export function callPackageId(manifest: DeploymentManifest): string {
+  return manifest.upgrade?.packageId ?? manifest.packageId;
+}
+
+/**
+ * Where a TYPE lives: always the original package.
+ *
+ * Move type identity is fixed at the address that first defined the struct. The
+ * treasury shared in the first publish is still
+ * `<original>::treasury::Treasury<<original>::mock_usdc::MOCK_USDC>` after any
+ * number of upgrades, so type arguments and objectChanges filters must use this
+ * — never the upgraded id.
+ */
+export function typePackageId(manifest: DeploymentManifest): string {
+  return manifest.packageId;
 }
 
 /** Where a manifest lives for a given network. */
@@ -130,11 +255,55 @@ export function targets(packageId: string) {
     mintMockUsdc: `${packageId}::mock_usdc::mint`,
     executePayment: `${packageId}::payment::execute_payment`,
     executeApproved: `${packageId}::payment::execute_approved`,
+    executeScheduled: `${packageId}::payment::execute_scheduled`,
     evaluate: `${packageId}::payment::evaluate`,
+    // Added by the escrow upgrade. Reachable only on the upgraded package.
+    requireShipment: `${packageId}::invoice::require_shipment_confirmation`,
+    oracleIssue: `${packageId}::oracle::issue_to`,
+    oracleAttest: `${packageId}::oracle::attest`,
+    executeConditional: `${packageId}::escrow::execute_conditional`,
+    executeConditionalApproved: `${packageId}::escrow::execute_conditional_approved`,
+    escrowRelease: `${packageId}::escrow::release`,
+    escrowRefund: `${packageId}::escrow::refund`,
+    escrowReleasable: `${packageId}::escrow::releasable`,
   } as const;
 }
 
-/** Struct types, for filtering objectChanges out of a transaction response. */
+/**
+ * Where a module's types live.
+ *
+ * The distinction that matters: `callPackageId` answers "where do I send a
+ * call", this answers "what will the created object's type string say". They
+ * differ for every module that existed before the current version.
+ */
+export function modulePackageId(manifest: DeploymentManifest, moduleName: string): string {
+  return manifest.moduleOrigins?.[moduleName] ?? manifest.packageId;
+}
+
+/**
+ * Every struct type, each resolved against the version that defined its module.
+ *
+ * Prefer this over `structTypes` wherever a manifest is in hand. Passing one
+ * package id for all of them is only correct before the first upgrade — it is
+ * what made the escrow seed fail, looking for `<v1>::oracle::OracleCap` when
+ * the chain had created `<v2>::oracle::OracleCap`.
+ */
+export function structTypesFor(manifest: DeploymentManifest) {
+  const original = structTypes(manifest.packageId);
+  return {
+    ...original,
+    paymentEscrow: `${modulePackageId(manifest, "escrow")}::escrow::PaymentEscrow`,
+    oracleCap: `${modulePackageId(manifest, "oracle")}::oracle::OracleCap`,
+    shipmentAttestation: `${modulePackageId(manifest, "oracle")}::oracle::ShipmentAttestation`,
+  } as const;
+}
+
+/**
+ * Struct types under ONE package id.
+ *
+ * Correct only when every module was defined by that version. After an upgrade
+ * that adds modules, use `structTypesFor`.
+ */
 export function structTypes(packageId: string) {
   return {
     treasury: `${packageId}::treasury::Treasury`,
@@ -147,6 +316,11 @@ export function structTypes(packageId: string) {
     paymentRecord: `${packageId}::payment::PaymentRecord`,
     paymentRequest: `${packageId}::payment::PaymentRequest`,
     humanApproval: `${packageId}::approval::HumanApproval`,
+    // The escrow upgrade adds these. Their types anchor to the ORIGINAL package
+    // id from the moment the upgraded code first creates one.
+    paymentEscrow: `${packageId}::escrow::PaymentEscrow`,
+    oracleCap: `${packageId}::oracle::OracleCap`,
+    shipmentAttestation: `${packageId}::oracle::ShipmentAttestation`,
   } as const;
 }
 

@@ -157,6 +157,16 @@ public(package) fun split_vault<T>(
     coin::from_balance(balance::split(&mut treasury.vault, amount), ctx)
 }
 
+/// The return leg of `split_vault`, for a refunded escrow.
+///
+/// `public(package)`, so only `escrow` can reach it, and it takes a `Balance`
+/// that could only have come from this vault in the first place. It is not a
+/// deposit path anyone can call with arbitrary funds — `deposit` is that, and
+/// it is deliberately separate.
+public(package) fun return_to_vault<T>(treasury: &mut Treasury<T>, funds: Balance<T>) {
+    balance::join(&mut treasury.vault, funds);
+}
+
 // --- Policy administration (TreasuryOwnerCap required on every one) ----------
 
 public fun set_min_reserve<T>(
@@ -329,12 +339,23 @@ public(package) fun record_agent_spend<T>(
     };
 }
 
+/// Claims an invoice number in the replay ledger, which is what check 8 reads.
+///
+/// Idempotent on the KEY, not on the value: an escrow claims the number when
+/// funds leave the vault, and the release that follows re-points the same entry
+/// at the payment record. The claim is what matters — once a number is in this
+/// table no further payment can be made against it, whether the first one is
+/// still sitting in escrow or has already settled.
 public(package) fun mark_invoice_paid<T>(
     treasury: &mut Treasury<T>,
     invoice_number: String,
     record_id: ID,
 ) {
-    treasury.paid_invoices.add(invoice_number, record_id);
+    if (treasury.paid_invoices.contains(invoice_number)) {
+        *treasury.paid_invoices.borrow_mut(invoice_number) = record_id;
+    } else {
+        treasury.paid_invoices.add(invoice_number, record_id);
+    };
 }
 
 public(package) fun record_payment<T>(treasury: &mut Treasury<T>, amount: u64) {

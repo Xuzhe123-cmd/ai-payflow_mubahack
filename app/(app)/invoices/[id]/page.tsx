@@ -15,6 +15,10 @@ import {
 import { RiskPanel, UrgencyPanel } from "@/components/invoices/RiskUrgencyPanels";
 import { CashFlowAnalysis } from "@/components/invoices/CashFlowAnalysis";
 import { DecisionChain } from "@/components/payments/DecisionChain";
+import { ShipmentEvidence } from "@/components/payments/ShipmentEvidence";
+import { OracleCard } from "@/components/dashboard/OracleCard";
+import { PipelineStrip } from "@/components/dashboard/PipelineStrip";
+import { buildInvoiceOracleFeed } from "@/lib/oracle/feed";
 import {
   AnalysisFailed,
   AnalysisProgress,
@@ -86,9 +90,25 @@ export default function InvoiceAnalysisPage({
         <div className="space-y-5">
           <EngineNotice analysis={analysis} />
 
-          <div className="animate-rise">
-            <DecisionChain entry={entry} />
+          {/* Oracle → AI → Guard → Sui, then the facts the oracle supplied for
+              THIS invoice, before the decision they produced. */}
+          <PipelineStrip />
+
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="animate-rise">
+              <DecisionChain entry={entry} />
+            </div>
+            <OracleCard
+              feed={buildInvoiceOracleFeed(analysis)}
+              title="Oracle data for this invoice"
+              subtitle="What the oracle asserted, and which of it the chain re-derived independently."
+            />
           </div>
+
+          {/* Only renders for an invoice that carries a shipment condition —
+              decided by chain state, never by an invoice number. An ordinary
+              invoice shows nothing here. */}
+          <ShipmentEvidence invoiceNumber={analysis.analysis.invoiceFacts.invoiceNumber} />
 
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-5">
@@ -118,6 +138,8 @@ export default function InvoiceAnalysisPage({
 }
 
 const EMPTY = {
+  approval: null,
+  humanRejected: false,
   status: "ANALYZING" as const,
   analysis: null,
   error: null,
@@ -146,7 +168,7 @@ function ProvenanceCard({
           label="Engine"
           value={
             engineMode === "fallback"
-              ? "Safety fallback"
+              ? "Deterministic fallback · AI explanation unavailable"
               : engineMode === "recorded"
                 ? "Workers AI (recorded)"
                 : "Cloudflare Workers AI"

@@ -61,6 +61,13 @@ export type ChainInvoiceStatus =
   | "PAID"
   | "REJECTED"
   | "HUMAN_REVIEW"
+  /**
+   * Funds have left the vault into escrow, and the supplier does not have them.
+   * Deliberately distinct from PAID: the invoice is not settled until the
+   * escrow releases, and calling it paid here would be a lie the audit trail
+   * keeps. Added by the escrow upgrade.
+   */
+  | "ESCROWED"
   | "UNKNOWN";
 
 export interface ChainInvoice {
@@ -112,6 +119,7 @@ const INVOICE_STATUS: ChainInvoiceStatus[] = [
   "PAID",
   "REJECTED",
   "HUMAN_REVIEW",
+  "ESCROWED",
 ];
 
 export function invoiceStatusFrom(code: number | null): ChainInvoiceStatus {

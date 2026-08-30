@@ -63,6 +63,27 @@ export const PURCHASE_ORDERS: PurchaseOrder[] = [
     issuedAt: "2026-08-24",
     description: "Powder coating line, phase 2",
   },
+  // The two conditional invoices' orders. Without these the pair reads as
+  // PO_NOT_FOUND, which makes them HIGH risk and sends them to human review —
+  // the opposite of what the escrow demo is about. Both are ordinary in every
+  // respect the policy engine can see; the only interesting thing about either
+  // is the shipment condition attached on chain.
+  {
+    poNumber: "PO-2026-0530",
+    supplierId: "sup_northwind",
+    amountCents: dollars(4_800),
+    currency: "USD",
+    issuedAt: "2026-08-28",
+    description: "Powder coating line, phase 2",
+  },
+  {
+    poNumber: "PO-2026-0531",
+    supplierId: "sup_kestrel",
+    amountCents: dollars(4_000),
+    currency: "USD",
+    issuedAt: "2026-08-29",
+    description: "Q3 freight and customs handling",
+  },
   {
     poNumber: "PO-2026-0399",
     supplierId: "sup_lumen",

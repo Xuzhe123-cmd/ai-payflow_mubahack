@@ -87,5 +87,60 @@
     ],
     "cashFlowEventCount": 6,
     "vaultFundedCents": 10000000
+  },
+  "upgradeCapId": "0x29976b1acd8bb91968ed2708cd99c4fb0e011d7defc1ee2a19a7b77218c5acda",
+  "upgrade": {
+    "packageId": "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578",
+    "previousPackageId": "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d",
+    "version": 2,
+    "upgradeCapId": "0x29976b1acd8bb91968ed2708cd99c4fb0e011d7defc1ee2a19a7b77218c5acda",
+    "upgradedAt": "2026-08-30T14:53:24.349Z",
+    "digest": "2i1skoFJMWEbMoAhwx5R2vNMLpTfhyDivsrYnBzyUq8r",
+    "addedModules": [
+      "escrow",
+      "oracle"
+    ]
+  },
+  "proofs": {
+    "a0": {
+      "scenario": "A0",
+      "invoiceNumber": "INV-2026-3455",
+      "amountCents": 300000,
+      "digest": "DwegxdkzVmtTnehTXy44noRBv6vDtSJRaYhAH5i8oH2G",
+      "packageId": "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d",
+      "module": "payment",
+      "function": "execute_payment",
+      "invoiceObjectId": "0x3124042beb52a69d178958037436e2d063e2739abd01ab94593396d71fdd710b",
+      "paymentRecordId": "0xcccc4e73a0282cffe0efc4d06240fe4f4c8f1a2f34c48ee31f008668240e69e7",
+      "supplierId": "sup_northwind",
+      "recipient": "0x7a1c9f4e2b8d6035ae91c4f7d2b60853f19ac4e7b2d8065193af7c2e4b8d6091",
+      "authority": 0,
+      "executedAt": "2026-08-30T00:00:00.000Z"
+    }
+  },
+  "moduleOrigins": {
+    "escrow": "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578",
+    "oracle": "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578"
+  },
+  "escrowDemo": {
+    "createdAt": "2026-08-30T15:08:03.577Z",
+    "oracleCapId": "0x834f4da6d286873d078311b830c50f99b7ec688b48a8824634de28d5df78168e",
+    "oracleId": "demo_shipment_oracle",
+    "invoices": [
+      {
+        "invoiceNumber": "INV-2026-3501",
+        "objectId": "0x927e138efa55e1fa300522191d01ac72a8b8a4c183c37c230a646b1a63c6065a",
+        "amountCents": 480000,
+        "supplierId": "sup_northwind"
+      },
+      {
+        "invoiceNumber": "INV-2026-3502",
+        "objectId": "0x7a617b9c89938e79092b07fb2f8aada17fd5669dc96e970099464b2979b061dd",
+        "amountCents": 400000,
+        "supplierId": "sup_kestrel"
+      }
+    ],
+    "escrowIds": [],
+    "attestationIds": []
   }
 }

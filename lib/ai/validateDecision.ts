@@ -6,11 +6,21 @@
  * values, a confidence in range, and a payment date the model was actually
  * offered.
  *
- * It contains no business rules. There is no "unknown supplier means escalate"
- * here — that judgement is the model's, and the tests assert on the model's own
- * pre-guard action to prove it. The guard is strictly monotonic: it can only
- * downgrade an action to HUMAN_REVIEW, never upgrade one, and never invent a
- * decision the model did not make.
+ * It contains no business rules of its own. There is no "unknown supplier means
+ * escalate" here — that judgement is the model's, and the tests assert on the
+ * model's own pre-guard action to prove it.
+ *
+ * What it does enforce is the DETERMINISTIC SAFETY BOUNDARY. A blocking
+ * condition — an unregistered supplier, a redirected remit wallet, an invoice
+ * already settled — is a fact, not an opinion, and the model does not get a
+ * vote on it. Those conditions force REJECT no matter what was recommended, so
+ * the model can be more cautious than the deterministic answer but can never be
+ * less. See ./blockingConditions, which is also what the fallback engine
+ * decides on, so the two can never disagree.
+ *
+ * The guard remains strictly monotonic: it only ever restricts. A structural
+ * failure lands on HUMAN_REVIEW, a blocking condition lands on REJECT, and
+ * neither ever produces an action that moves money.
  */
 
 import type {
@@ -21,6 +31,7 @@ import type {
   TreasuryDecision,
 } from "../types";
 import { LEVELS, MIN_CONFIDENCE, TREASURY_ACTIONS } from "./decisionSchema";
+import { blockingConditions } from "./blockingConditions";
 
 const MAX_REASON_LENGTH = 300;
 const MAX_EXPLANATION_LENGTH = 1200;
@@ -78,7 +89,52 @@ function escalation(
   };
 }
 
+/**
+ * Forces REJECT over whatever the model asked for.
+ *
+ * The model's own action is preserved in `from`, because what it recommended
+ * for a redirected wallet is exactly the thing worth showing on screen — the
+ * guard overruling it is the demonstration, not an embarrassment to hide.
+ */
+function refuse(reasons: string[], outcome: ValidationOutcome): ValidationOutcome {
+  const detail = reasons.join(" ");
+  const decision = outcome.decision;
+  return {
+    decision: {
+      ...decision,
+      action: "REJECT",
+      recommendedDate: null,
+      risk: "CRITICAL",
+      reasons: reasons.slice(0, MAX_REASONS),
+      riskExplanation: detail,
+      decisionExplanation:
+        `Refused by the decision guard: this invoice fails a deterministic safety check, ` +
+        `which no recommendation can override. ${detail}`.trim(),
+    },
+    violations: [
+      ...outcome.violations,
+      { code: "BLOCKING_CONDITION", detail },
+    ],
+    // Only a change of action counts as a downgrade. A model that already said
+    // REJECT was right, and reporting it as guard-rescued would misrepresent it.
+    downgraded: decision.action !== "REJECT",
+    from: outcome.from,
+  };
+}
+
 export function validateDecision(
+  raw: string,
+  analysis: Readonly<DeterministicAnalysis>,
+): ValidationOutcome {
+  const outcome = validateStructure(raw, analysis);
+
+  // Applied to every path, including malformed output: an invoice that must not
+  // be paid must not become payable because the model failed to parse either.
+  const blocking = blockingConditions(analysis);
+  return blocking.length > 0 ? refuse(blocking, outcome) : outcome;
+}
+
+function validateStructure(
   raw: string,
   analysis: Readonly<DeterministicAnalysis>,
 ): ValidationOutcome {

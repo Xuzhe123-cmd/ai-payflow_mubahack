@@ -90,3 +90,20 @@ export type ChainSnapshotResponse =
 export type DecisionsResponse =
   | { ok: true; snapshot: ChainSnapshot; decisions: PaymentDecision[] }
   | { ok: false; reason: "NOT_DEPLOYED" | "READ_FAILED"; message: string };
+
+/**
+ * The result of a human approving an escalated payment.
+ *
+ * `enforcement` is a full re-run of the ten checks under the APPROVER's limits.
+ * Approval widens who may authorize the amount; it does not skip a single
+ * check, and the outcome can still be SUI_REJECT.
+ */
+export interface ApprovalResponse {
+  scenarioId: string;
+  worldSource: "chain" | "fixture";
+  paymentRequest: PaymentRequest;
+  enforcement: PolicyEnforcementResult;
+  approvedUnder: "HUMAN_APPROVAL";
+  agentMaxSinglePaymentCents: number;
+  approverMaxSinglePaymentCents: number;
+}

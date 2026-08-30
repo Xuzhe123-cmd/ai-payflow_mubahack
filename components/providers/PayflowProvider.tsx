@@ -29,14 +29,15 @@ import {
 } from "react";
 
 import type { PipelineStepName } from "@/lib/types";
-import type { AnalysisResponse } from "@/lib/services/contracts";
+import type { AnalysisResponse, ApprovalResponse } from "@/lib/services/contracts";
+import { approvePayment } from "@/lib/services/approvalService";
 import { analyzeInvoice } from "@/lib/services/analysisService";
 import {
   CONNECT_STAGES,
-  detectInvoices,
   type ConnectStageId,
   type DetectedInvoice,
 } from "@/lib/services/inboxService";
+import { listInvoices } from "@/lib/services/invoiceListService";
 import {
   executePayment as submitPayment,
   EXECUTION_STAGES,
@@ -45,6 +46,7 @@ import {
 } from "@/lib/services/suiService";
 import { signInWithGoogle, type TreasurySession } from "@/lib/services/authService";
 import { AS_OF_DATE } from "@/lib/services/treasuryService";
+import { decideAutonomy, shouldActAutonomously } from "@/lib/payments/autonomy";
 
 // ---------------------------------------------------------------------------
 // State
@@ -68,6 +70,18 @@ export interface InvoiceRun {
   /** Pipeline steps already reported, for the live progress list. */
   completedSteps: PipelineStepName[];
   executionStage: ExecutionStageId | null;
+  /**
+   * Set only when a HUMAN has approved an escalated payment.
+   *
+   * This is what gives an escalated invoice a PaymentRequest at all — the agent
+   * cannot produce one, because buildPaymentRequest refuses to build for
+   * HUMAN_REVIEW. The enforcement inside it is a full re-run of the ten checks
+   * under the approver's limits, so approval widens authority without skipping
+   * a single rule.
+   */
+  approval: ApprovalResponse | null;
+  /** A human declining the payment outright. Stops the workflow. */
+  humanRejected: boolean;
 }
 
 export type ActivityScope = "SYSTEM" | "INBOX" | "AI" | "CHAIN";
@@ -104,6 +118,8 @@ const EMPTY_RUN: InvoiceRun = {
   receipt: null,
   completedSteps: [],
   executionStage: null,
+  approval: null,
+  humanRejected: false,
 };
 
 const INITIAL_STATE: PayflowState = {
@@ -290,6 +306,10 @@ export interface PayflowContextValue {
   analyzeAll: () => Promise<void>;
   analyzeOne: (invoiceId: string) => Promise<void>;
   executeInvoicePayment: (invoiceId: string) => Promise<void>;
+  /** A human authorizing a payment the agent may not make alone. */
+  approveInvoicePayment: (invoiceId: string) => Promise<void>;
+  /** A human declining outright. */
+  rejectInvoicePayment: (invoiceId: string) => void;
   setActiveInvoice: (invoiceId: string | null) => void;
   setSpeed: (speed: DemoSpeed) => void;
   reset: () => void;
@@ -471,6 +491,35 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
           );
         }
         logMany(events.reverse());
+
+        // ANALYSIS ENDS HERE. It establishes that the agent is AUTHORIZED to
+        // settle this payment; it does not settle it.
+        //
+        // An earlier version fired the payment from this point, which made the
+        // interface claim "executing" on an invoice where no transaction
+        // existed. Authorization and execution are different facts and the
+        // screen must be able to show the first without asserting the second —
+        // so the payment is submitted when someone submits it, and until then
+        // the outcome box reads "Approved · ready to execute".
+        const autonomy = decideAutonomy({
+          action: result.decision.action,
+          finalOutcome: result.finalOutcome,
+          hasPaymentRequest: result.paymentRequest !== null,
+          enforcement: result.enforcement,
+          conditional: false,
+        });
+
+        if (shouldActAutonomously(autonomy)) {
+          log(
+            activityEvent(
+              "CHAIN",
+              `Approved for autonomous execution · ${invoice.invoiceNumber}`,
+              autonomy.kind === "AUTONOMOUS" ? autonomy.reason : "",
+              invoiceId,
+              "positive",
+            ),
+          );
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Analysis failed.";
         dispatch({ type: "RUN_PATCH", invoiceId, patch: { status: "FAILED", error: message } });
@@ -552,8 +601,22 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
       await wait(stage.durationMs * factor);
     }
 
-    const invoices = await detectInvoices(AS_OF_DATE);
+    // Membership comes from the chain, so an invoice created after the seed
+    // appears without anyone adding it to a fixture.
+    const listed = await listInvoices();
+    const invoices = listed.invoices;
     dispatch({ type: "CONNECT_DONE", invoices });
+    if (!listed.fromChain && listed.reason) {
+      log(
+        activityEvent(
+          "SYSTEM",
+          "Invoice list fell back to local fixtures",
+          `${listed.reason} Invoices created on chain after the seed may be missing.`,
+          null,
+          "negative",
+        ),
+      );
+    }
     logMany([
       activityEvent(
         "INBOX",
@@ -574,14 +637,102 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
     void analyzeQueue(invoices);
   }, [analyzeQueue, factor, log, logMany]);
 
+  // ---- human approval ------------------------------------------------------
+
+  /**
+   * A treasury operator authorizing a payment the agent may not make alone.
+   *
+   * This does NOT execute. It asks the server to re-run the ten policy checks
+   * under the approver's limits and stores the result; execution remains a
+   * separate, explicit step, and still refuses unless that enforcement came
+   * back APPROVED. A human can grant authority the agent lacks — they cannot
+   * grant authority the treasury withholds from everyone.
+   */
+  const approveInvoicePayment = useCallback(
+    async (invoiceId: string) => {
+      const run = stateRef.current.runs[invoiceId];
+      const scenarioId = stateRef.current.invoices.find(
+        (invoice) => invoice.id === invoiceId,
+      )?.scenarioId;
+      if (!run?.analysis || !scenarioId || run.humanRejected) return;
+
+      try {
+        const approval = await approvePayment(scenarioId);
+        dispatch({ type: "RUN_PATCH", invoiceId, patch: { approval } });
+
+        const approved = approval.enforcement.outcome === "APPROVED";
+        log(
+          activityEvent(
+            "CHAIN",
+            approved
+              ? `Human approved ${approval.paymentRequest.invoiceNumber}`
+              : `Approval refused on chain for ${approval.paymentRequest.invoiceNumber}`,
+            approved
+              ? "Re-checked under the approver's limits; every on-chain rule still passed."
+              : approval.enforcement.violations.map((violation) => violation.detail).join(" "),
+            invoiceId,
+            approved ? "positive" : "negative",
+          ),
+        );
+      } catch (error) {
+        dispatch({
+          type: "RUN_PATCH",
+          invoiceId,
+          patch: {
+            error: error instanceof Error ? error.message : "Approval could not be evaluated.",
+          },
+        });
+      }
+    },
+    [log],
+  );
+
+  /** A human declining outright. No transaction, and the workflow stops. */
+  const rejectInvoicePayment = useCallback(
+    (invoiceId: string) => {
+      const run = stateRef.current.runs[invoiceId];
+      if (!run?.analysis) return;
+      dispatch({
+        type: "RUN_PATCH",
+        invoiceId,
+        patch: { humanRejected: true, approval: null },
+      });
+      log(
+        activityEvent(
+          "SYSTEM",
+          `Operator declined ${run.analysis.analysis.invoiceFacts.invoiceNumber}`,
+          "No payment request was submitted to the chain.",
+          invoiceId,
+          "warning",
+        ),
+      );
+    },
+    [log],
+  );
+
   // ---- execution ---------------------------------------------------------
+  /**
+   * Held in a ref because analysis runs before this callback is defined, and
+   * reordering the file to satisfy the closure would be a worse trade than one
+   * ref with a comment explaining it.
+   */
+  const executeRef = useRef<((invoiceId: string) => Promise<void>) | null>(null);
+
   const executeInvoicePayment = useCallback(
     async (invoiceId: string) => {
       const run = stateRef.current.runs[invoiceId];
-      const request = run?.analysis?.paymentRequest;
-      const enforcement = run?.analysis?.enforcement;
-      // Execution is gated on the chain's answer, never on the AI's.
+      // A human-approved payment carries its own request and its own
+      // enforcement result, re-run under the approver's limits. Either source
+      // is acceptable; an unenforced one never is.
+      const request = run?.approval?.paymentRequest ?? run?.analysis?.paymentRequest;
+      const enforcement = run?.approval?.enforcement ?? run?.analysis?.enforcement;
+      // Gated on the chain's answer — never on the AI's, and never on the mere
+      // fact that a human clicked approve.
       if (!request || enforcement?.outcome !== "APPROVED") return;
+      if (run?.humanRejected) return;
+      // Idempotence. A reload, a second click, or an autonomous run racing a
+      // manual one must not pay twice — only an ANALYZED invoice is payable.
+      if (run.status === "EXECUTING" || run.status === "PAID") return;
 
       dispatch({ type: "RUN_PATCH", invoiceId, patch: { status: "EXECUTING" } });
 
@@ -608,6 +759,10 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
     },
     [factor, log],
   );
+
+  useEffect(() => {
+    executeRef.current = executeInvoicePayment;
+  }, [executeInvoicePayment]);
 
   /**
    * Picks up work a reload interrupted. Runs once per mount: a failing
@@ -647,6 +802,8 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
       analyzeAll,
       analyzeOne,
       executeInvoicePayment,
+      approveInvoicePayment,
+      rejectInvoicePayment,
       setActiveInvoice,
       setSpeed,
       reset,
@@ -660,6 +817,8 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
       analyzeAll,
       analyzeOne,
       executeInvoicePayment,
+      approveInvoicePayment,
+      rejectInvoicePayment,
       setActiveInvoice,
       setSpeed,
       reset,

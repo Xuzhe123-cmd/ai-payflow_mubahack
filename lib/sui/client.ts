@@ -39,6 +39,17 @@ export interface ChainQueries {
   multiGetObjectFields(objectIds: string[]): Promise<unknown[]>;
   /** Every page of dynamic fields under a parent id, already followed. */
   getDynamicFields(parentId: string): Promise<DynamicFieldEntry[]>;
+  /**
+   * The object's current version, as the INDEX sees it.
+   *
+   * Optional so existing fakes need not implement it. It exists to tell two
+   * situations apart that otherwise look identical: an object whose state is
+   * genuinely not what was expected, and an object the indexer has simply not
+   * caught up to. A version still sitting at its pre-transaction value is the
+   * second, and treating it as the first is how a successful release came to be
+   * reported as a failed one.
+   */
+  getObjectVersion?(objectId: string): Promise<string | null>;
 }
 
 export function graphqlUrlFor(network: SuiNetwork): string {
@@ -102,6 +113,15 @@ export function createSuiQueries(network: SuiNetwork): ChainQueries {
         { id: objectId },
       );
       return data.object?.asMoveObject?.contents?.json ?? null;
+    },
+
+    async getObjectVersion(objectId) {
+      const data = await query<{ object: { version?: number | string } | null }>(
+        `query($id: SuiAddress!) { object(address: $id) { version } }`,
+        { id: objectId },
+      );
+      const version = data.object?.version;
+      return version === undefined || version === null ? null : String(version);
     },
 
     async multiGetObjectFields(objectIds) {
