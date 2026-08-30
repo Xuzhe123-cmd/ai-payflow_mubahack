@@ -88,6 +88,15 @@ export interface TreasuryState {
 export interface TreasuryPolicy {
   minimumReserveCents: Cents;
   allowedCurrencies: string[];
+  /**
+   * Above this, a payment needs a human approver — the agent's own capability
+   * is not enough, however confident the AI is.
+   *
+   * This is a routing rule, not a limit: it decides WHICH authority a payment
+   * runs under, and therefore which set of limits the checks are measured
+   * against. It is never supplied by the caller.
+   */
+  humanApprovalThresholdCents: Cents;
 }
 
 /** Mirrors the AgentCapability object that will live on Sui. */
@@ -95,6 +104,13 @@ export interface AgentCapability {
   agentId: string;
   authorized: boolean;
   enabled: boolean;
+  maxSinglePaymentCents: Cents;
+  dailyLimitCents: Cents;
+  dailySpentCents: Cents;
+}
+
+/** What a human approver may authorize, for payments above the threshold. */
+export interface ApproverAuthority {
   maxSinglePaymentCents: Cents;
   dailyLimitCents: Cents;
   dailySpentCents: Cents;
@@ -109,6 +125,7 @@ export interface WorldSnapshot {
   treasury: TreasuryState;
   policy: TreasuryPolicy;
   capability: AgentCapability;
+  approver: ApproverAuthority;
 }
 
 /**
@@ -276,6 +293,16 @@ export interface TreasuryDecision {
   reasons: string[];
   riskExplanation: string;
   cashFlowExplanation: string;
+  /**
+   * Why not pay today, in the model's own words. Empty when the recommendation
+   * IS today, when no payment was recommended, or when an older recording
+   * predates this field — the interface falls back to cashFlowExplanation.
+   *
+   * Deliberately NOT a guard-checked field: validateDecision inspects structure
+   * only, and escalating a sound decision over missing prose would restrict
+   * nothing while mislabelling a correct answer as guard-rescued.
+   */
+  whyNotTodayExplanation: string;
   decisionExplanation: string;
 }
 
@@ -303,6 +330,15 @@ export interface DecisionResult {
   engine: EngineKind;
   rawModelOutput: string | null;
   modelId: string | null;
+  /**
+   * Raw transport failure, when the engine could not run at all.
+   *
+   * Deliberately NOT in `reasons`. An HTTP status is not a fact about the
+   * invoice, and rendering one as a decision reason buries the verdict a reader
+   * actually needs. The interface shows a humanised line and keeps this behind
+   * an "Engine details" disclosure.
+   */
+  engineFailure?: string | null;
   guard: {
     downgraded: boolean;
     from: TreasuryAction | null;
@@ -314,6 +350,81 @@ export interface DecisionResult {
 export interface TreasuryDecisionEngine {
   readonly id: "llm" | "fallback" | "recorded";
   decide(analysis: Readonly<DeterministicAnalysis>): Promise<DecisionResult>;
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation layer — advisory, sits between the AI and the chain
+// ---------------------------------------------------------------------------
+
+/**
+ * The comparison behind a scheduled date: what paying today would have cost.
+ *
+ * Every number here is deterministic — it is re-read from the candidate set the
+ * model was offered, never from the model's prose. Computed AFTER the decision
+ * (it needs to know which date was chosen), which is why it is not part of
+ * DeterministicAnalysis.
+ */
+export interface WhyNotToday {
+  /** Always cashFlowScenarios[0] — the candidate set always opens with today. */
+  today: CashFlowScenario;
+  recommended: CashFlowScenario;
+  /** Every candidate, in date order, for the comparison table. */
+  alternatives: CashFlowScenario[];
+  /** recommended.projectedMinimumCash − today.projectedMinimumCash. */
+  minimumCashDeltaCents: Cents;
+  /** recommended.discountCaptured − today.discountCaptured. Negative = given up. */
+  discountDeltaCents: Cents;
+  todayBreaches: boolean;
+  verdict:
+    | "TODAY_BREACHES_RESERVE"
+    | "LATER_IMPROVES_LIQUIDITY"
+    | "DISCOUNT_FAVOURS_EARLIER"
+    | "TODAY_IS_EQUIVALENT";
+}
+
+/**
+ * What the AI recommends. Advisory only.
+ *
+ * This is NOT permission to move funds, and nothing in the codebase turns one
+ * into a transaction: the only path to a transfer runs through PaymentRequest
+ * and the Move enforcement that judges it. Every field below is explanatory —
+ * none of them is read by the chain.
+ *
+ * `action` reuses TreasuryAction, where AUTO_PAY is the "PAY_NOW" of the spec.
+ */
+export interface PaymentRecommendation {
+  /** Stable across re-runs: a hash of invoice, action, date and amount only. */
+  recommendationId: string;
+  action: TreasuryAction;
+  recommendedDate: IsoDate | null;
+  riskLevel: Level;
+  riskReasons: string[];
+  urgencyLevel: Level;
+  cashStatus: "SAFE" | "RESERVE_BREACH";
+  projectedMinimumCashCents: Cents;
+  minimumReserveCents: Cents;
+  reserveBreach: boolean;
+  /**
+   * What the chosen timing is worth against paying today, in cash terms.
+   *
+   * Defined as the discount delta alone. There is deliberately no late-payment
+   * penalty term: the domain model carries no late-fee data, so any such figure
+   * would be invented rather than derived, and every number the interface shows
+   * has to be one the system can actually verify.
+   */
+  financialImpactCents: Cents;
+  whyNotToday: WhyNotToday | null;
+  reason: string;
+  /**
+   * 0..1. INFORMATIONAL ONLY — it explains the recommendation to a human and is
+   * never sent to Move. See lib/ai/validateDecision.ts, where the confidence
+   * floor can only ever downgrade an action, never authorize one.
+   */
+  aiConfidence: number;
+  /** Epoch milliseconds, from the pipeline's injected clock. */
+  generatedAtMs: number;
+  /** generatedAtMs + RECOMMENDATION_TTL_MS. Enforced on-chain, not just here. */
+  expiresAtMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -329,8 +440,21 @@ export interface PaymentRequest {
   recipientWallet: string;
   requestedDate: IsoDate;
   agentId: string;
+  /**
+   * Provenance of the recommendation this request came from. The chain stores
+   * the id for audit and enforces the two timestamps; it reads nothing else
+   * about how the recommendation was reached.
+   */
+  recommendationId: string;
+  recommendedAtMs: number;
+  expiresAtMs: number;
 }
 
+/**
+ * One code per Move `assert!`. The numeric abort code each one carries on chain
+ * is its position in POLICY_CHECK_ORDER (lib/sui/errorCodes.ts), so a Move abort
+ * decodes straight back to the member of this union the interface already knows.
+ */
 export type PolicyViolationCode =
   | "AGENT_NOT_AUTHORIZED"
   | "CAPABILITY_DISABLED"
@@ -340,7 +464,8 @@ export type PolicyViolationCode =
   | "RECIPIENT_WALLET_MISMATCH"
   | "INVOICE_ALREADY_PAID"
   | "CURRENCY_NOT_ALLOWED"
-  | "INSUFFICIENT_RESERVE";
+  | "INSUFFICIENT_RESERVE"
+  | "RECOMMENDATION_EXPIRED";
 
 export interface PolicyViolation {
   code: PolicyViolationCode;
@@ -379,6 +504,13 @@ export interface PolicyEnforcementResult {
 export type FinalOutcome =
   | "EXECUTED"
   | "SCHEDULED"
+  /**
+   * The AI chose to pay and every on-chain check passes — but the amount is
+   * above the human-approval threshold, so a person has to authorize it before
+   * it can execute. Distinct from HUMAN_REVIEW, which is the AI declining to
+   * decide; this is policy inserting a human into a decision the AI did make.
+   */
+  | "AWAITING_APPROVAL"
   | "HUMAN_REVIEW"
   | "REJECTED"
   | "SUI_REJECT";
@@ -405,6 +537,9 @@ export interface PipelineRun {
   asOfDate: IsoDate;
   analysis: DeterministicAnalysis;
   decision: DecisionResult;
+  /** The AI's advisory output. Always present — even for REJECT. */
+  recommendation: PaymentRecommendation;
+  /** Only built for AUTO_PAY and SCHEDULE. Null means nothing reached the chain. */
   paymentRequest: PaymentRequest | null;
   enforcement: PolicyEnforcementResult | null;
   finalOutcome: FinalOutcome;

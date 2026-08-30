@@ -28,17 +28,19 @@ export function fallbackDecision(
       risk: "MEDIUM",
       urgency: "MEDIUM",
       confidence: 0,
-      reasons: [FALLBACK_NOTICE, reason.summary],
+      reasons: [FALLBACK_NOTICE],
       riskExplanation:
         "No risk assessment was produced: assessing risk requires the AI engine, which did not return a usable decision.",
       cashFlowExplanation:
         "No timing recommendation was produced. The deterministic cash-flow projections are still available for a human reviewer.",
+      whyNotTodayExplanation: "",
       decisionExplanation:
         "Routed to human review because the AI decision engine was unavailable. This is a safety default, not an assessment of this invoice.",
     },
     engine: "FALLBACK",
     rawModelOutput: null,
     modelId: null,
+    engineFailure: reason.summary,
     guard: { downgraded: false, from: null, violations: [] },
     latencyMs,
   };

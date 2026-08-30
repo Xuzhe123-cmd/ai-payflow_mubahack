@@ -76,14 +76,15 @@ export function describeDueIn(days: number): string {
 export const ACTION_LABEL: Record<TreasuryAction, string> = {
   AUTO_PAY: "Pay now",
   SCHEDULE: "Schedule",
-  HUMAN_REVIEW: "Human review required",
+  HUMAN_REVIEW: "Human approval",
   REJECT: "Payment rejected",
 };
 
 export const OUTCOME_LABEL: Record<FinalOutcome, string> = {
   EXECUTED: "Approved",
   SCHEDULED: "Scheduled",
-  HUMAN_REVIEW: "Needs review",
+  AWAITING_APPROVAL: "Awaiting approval",
+  HUMAN_REVIEW: "Human approval",
   REJECTED: "Rejected",
   SUI_REJECT: "Blocked on chain",
 };

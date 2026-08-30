@@ -47,6 +47,7 @@ function stubEngine(action: TreasuryAction, recommendedDate: string | null): Tre
           reasons: ["stubbed decision"],
           riskExplanation: "stub",
           cashFlowExplanation: "stub",
+          whyNotTodayExplanation: "stub",
           decisionExplanation: "stub",
         },
         engine: "LLM",
@@ -81,19 +82,46 @@ describe("the fallback engine cannot cause a payment", () => {
 });
 
 describe("Sui remains the final authority", () => {
-  it("rejects the over-cap invoice no matter which action the AI chooses", async () => {
+  it("rejects an autonomous payment above the agent's cap", async () => {
+    // AUTO_PAY is the agent claiming it will settle this itself, so it is
+    // measured against the agent's own capability — which it exceeds.
+    const scenario = scenarioById("s8_policy_violation");
+    const run = await runScenario(scenario, stubEngine("AUTO_PAY", scenario.asOfDate));
+
+    expect(run.decision.decision.action).toBe("AUTO_PAY");
+    expect(run.finalOutcome).toBe("SUI_REJECT");
+    expect(run.enforcement?.outcome).toBe("SUI_REJECT");
+    expect(run.enforcement?.violations.map((v) => v.code)).toContain("EXCEEDS_MAX_PAYMENT");
+  });
+
+  it("rejects an over-cap payment submitted under agent authority, whatever the action", async () => {
+    // The security demonstration: submit it anyway and watch the chain refuse.
     const scenario = scenarioById("s8_policy_violation");
 
     for (const [action, date] of [
       ["AUTO_PAY", scenario.asOfDate],
       ["SCHEDULE", "2026-09-18"],
     ] as Array<[TreasuryAction, string]>) {
-      const run = await runScenario(scenario, stubEngine(action, date));
+      const run = await runScenario(scenario, stubEngine(action, date), {
+        forceAgentAuthority: true,
+      });
       expect(run.decision.decision.action).toBe(action);
       expect(run.finalOutcome).toBe("SUI_REJECT");
       expect(run.enforcement?.outcome).toBe("SUI_REJECT");
       expect(run.enforcement?.violations.map((v) => v.code)).toContain("EXCEEDS_MAX_PAYMENT");
     }
+  });
+
+  it("never lets the agent promote itself past its own cap", async () => {
+    // A scheduled over-cap payment needs a human. The critical property is that
+    // it does not EXECUTE — it waits for a person who holds an approval the
+    // agent cannot mint.
+    const scenario = scenarioById("s8_policy_violation");
+    const run = await runScenario(scenario, stubEngine("SCHEDULE", "2026-09-18"));
+
+    expect(run.finalOutcome).toBe("AWAITING_APPROVAL");
+    expect(run.finalOutcome).not.toBe("EXECUTED");
+    expect(run.finalOutcome).not.toBe("SCHEDULED");
   });
 
   it("rejects a duplicate even when the AI insists on paying it", async () => {

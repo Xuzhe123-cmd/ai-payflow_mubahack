@@ -25,19 +25,21 @@ export const EXPECTATIONS: ScenarioExpectation[] = [
     scenarioId: "s1_normal",
     allowedActions: ["AUTO_PAY"],
     finalOutcomes: ["EXECUTED"],
-    why: "Fully verified, due in two days, no liquidity pressure — nothing is gained by waiting.",
+    why: "Fully verified, due in two days, $3,000 is inside the agent's cap — nothing is gained by waiting.",
   },
   {
     scenarioId: "s2_cashflow",
+    // Every on-chain check passes; $30,000 is simply above what the agent may
+    // settle alone, so policy inserts a person. The AI still chose SCHEDULE.
     allowedActions: ["SCHEDULE"],
-    finalOutcomes: ["SCHEDULED"],
-    why: "Legitimate, but paying today troughs $8,000 below the reserve while later dates do not.",
+    finalOutcomes: ["AWAITING_APPROVAL"],
+    why: "Legitimate, but paying today troughs below the reserve, and $30,000 needs a human approver.",
   },
   {
     scenarioId: "s3_discount",
     allowedActions: ["AUTO_PAY"],
     finalOutcomes: ["EXECUTED"],
-    why: "A $600 discount expires today and liquidity is comfortable, so paying now is worth real money.",
+    why: "A $240 discount expires today, liquidity is comfortable, and $4,800 is inside the agent's cap.",
   },
   {
     scenarioId: "s4_new_supplier",
@@ -66,10 +68,14 @@ export const EXPECTATIONS: ScenarioExpectation[] = [
   },
   {
     scenarioId: "s8_policy_violation",
-    // The AI may legitimately want to pay this clean invoice; Sui still refuses.
+    // The AI may legitimately want to pay this clean invoice; either way it does
+    // not get to. AUTO_PAY is refused outright because the agent is claiming
+    // authority it does not have; SCHEDULE waits for a person. What it can
+    // never be is EXECUTED or SCHEDULED on the agent's say-so, and the
+    // "Sui remains the final authority" invariants assert exactly that.
     allowedActions: ["AUTO_PAY", "SCHEDULE"],
-    finalOutcomes: ["SUI_REJECT"],
-    why: "$68,000 exceeds the agent's $50,000 on-chain cap, whatever the AI recommends.",
+    finalOutcomes: ["SUI_REJECT", "AWAITING_APPROVAL"],
+    why: "$8,000 exceeds the agent's $5,000 on-chain cap, whatever the AI recommends.",
   },
 ];
 

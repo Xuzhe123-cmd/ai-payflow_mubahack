@@ -10,7 +10,7 @@ export const PURCHASE_ORDERS: PurchaseOrder[] = [
   {
     poNumber: "PO-2026-0412",
     supplierId: "sup_northwind",
-    amountCents: dollars(12_400),
+    amountCents: dollars(3_000),
     currency: "USD",
     issuedAt: "2026-08-04",
     description: "Bearing assemblies, batch 44",
@@ -18,7 +18,7 @@ export const PURCHASE_ORDERS: PurchaseOrder[] = [
   {
     poNumber: "PO-2026-0455",
     supplierId: "sup_kestrel",
-    amountCents: dollars(68_000),
+    amountCents: dollars(8_000),
     currency: "USD",
     issuedAt: "2026-08-10",
     description: "Q3 freight and customs handling",
@@ -58,7 +58,7 @@ export const PURCHASE_ORDERS: PurchaseOrder[] = [
   {
     poNumber: "PO-2026-0511",
     supplierId: "sup_lumen",
-    amountCents: dollars(30_000),
+    amountCents: dollars(4_800),
     currency: "USD",
     issuedAt: "2026-08-24",
     description: "Powder coating line, phase 2",

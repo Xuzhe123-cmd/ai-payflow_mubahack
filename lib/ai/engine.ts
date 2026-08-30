@@ -7,7 +7,7 @@
  */
 
 import type { TreasuryDecisionEngine } from "../types";
-import { createFallbackEngine } from "./fallbackEngine";
+import { createDeterministicEngine } from "./deterministicEngine";
 import { createLlmEngine, type LlmEngineOptions } from "./llmEngine";
 import { createWorkersAiClient, readWorkersAiConfig } from "./workersAiClient";
 
@@ -29,7 +29,7 @@ export function selectDecisionEngine(
   if (!config) {
     const reason =
       "CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are not set, so no model could be called.";
-    return { engine: createFallbackEngine(reason), live: false, modelId: null, reason };
+    return { engine: createDeterministicEngine(reason), live: false, modelId: null, reason };
   }
 
   return {

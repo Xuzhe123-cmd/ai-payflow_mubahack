@@ -12,6 +12,7 @@ import type {
   EngineKind,
   FinalOutcome,
   IsoDate,
+  PaymentRecommendation,
   PaymentRequest,
   PipelineStep,
   PolicyEnforcementResult,
@@ -20,6 +21,8 @@ import type {
 } from "../types";
 import type { CashProjection } from "../deterministic/projection";
 import type { EngineMode } from "../ai/recordings";
+import type { ChainSnapshot } from "../sui/chainTypes";
+import type { PaymentDecision } from "../decision/types";
 
 export interface ScenarioSummary {
   id: string;
@@ -48,12 +51,42 @@ export interface AnalysisResponse {
   decision: TreasuryDecision;
   guard: DecisionResult["guard"];
   projection: CashProjection;
+  /**
+   * The AI's advisory output. Always present, including for HUMAN_REVIEW and
+   * REJECT — it is what the AI thinks, not what it is allowed to do.
+   */
+  recommendation: PaymentRecommendation;
+  /** Null unless the recommendation was AUTO_PAY or SCHEDULE. */
   paymentRequest: PaymentRequest | null;
   enforcement: PolicyEnforcementResult | null;
   finalOutcome: FinalOutcome;
   steps: PipelineStep[];
+  /**
+   * Whether the figures behind this analysis came from live testnet state or
+   * from the bundled fixtures. Surfaced so the interface can say which, rather
+   * than presenting fixture numbers as chain numbers.
+   */
+  worldSource?: "chain" | "fixture";
 }
 
 export interface AnalysisErrorResponse {
   error: string;
 }
+
+// ---------------------------------------------------------------------------
+// Live chain state
+// ---------------------------------------------------------------------------
+
+/**
+ * The wire shape of /api/chain. Discriminated rather than throwing, because
+ * "no deployment yet" is a normal state for a developer running the app, not a
+ * failure worth a stack trace.
+ */
+export type ChainSnapshotResponse =
+  | { ok: true; snapshot: ChainSnapshot }
+  | { ok: false; reason: "NOT_DEPLOYED" | "READ_FAILED"; message: string };
+
+/** The wire shape of /api/decisions: chain state and the verdicts drawn from it. */
+export type DecisionsResponse =
+  | { ok: true; snapshot: ChainSnapshot; decisions: PaymentDecision[] }
+  | { ok: false; reason: "NOT_DEPLOYED" | "READ_FAILED"; message: string };

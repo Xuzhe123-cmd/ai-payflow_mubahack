@@ -61,6 +61,11 @@ export const DECISION_JSON_SCHEMA = {
       type: "string",
       description: "How the candidate-date projections informed the timing.",
     },
+    whyNotToday: {
+      type: "string",
+      description:
+        "If you chose a date later than today, say what paying today would have cost, quoting the projected minimum cash for today and for your chosen date. Empty string if you are paying today or recommending no payment.",
+    },
     decisionExplanation: {
       type: "string",
       description: "Why this action, in two or three sentences.",
@@ -75,6 +80,7 @@ export const DECISION_JSON_SCHEMA = {
     "reasons",
     "riskExplanation",
     "cashFlowExplanation",
+    "whyNotToday",
     "decisionExplanation",
   ],
 } as const;

@@ -14,6 +14,7 @@ import type {
 } from "../types";
 import { DECISION_JSON_SCHEMA } from "./decisionSchema";
 import { fallbackDecision } from "./fallbackEngine";
+import { createDeterministicEngine } from "./deterministicEngine";
 import { SYSTEM_PROMPT, buildUserMessage } from "./prompt";
 import { validateDecision } from "./validateDecision";
 import type { ChatMessage, WorkersAiClient } from "./workersAiClient";
@@ -80,12 +81,12 @@ export function createLlmEngine(
             { role: "user", content: RETRY_NUDGE },
           ]);
         } catch (retryError) {
-          return fallbackDecision(
-            {
-              summary: `Workers AI could not be reached: ${describe(error)} (retry also failed: ${describe(retryError)})`,
-            },
-            Date.now() - startedAt,
-          );
+          // The model is unreachable. Fall through to the deterministic rules
+          // rather than escalating every invoice — an outage is not a fact
+          // about the invoice.
+          const failure = `Workers AI could not be reached: ${describe(error)} (retry also failed: ${describe(retryError)})`;
+          const result = await createDeterministicEngine(failure).decide(analysis);
+          return { ...result, latencyMs: Date.now() - startedAt };
         }
       }
 

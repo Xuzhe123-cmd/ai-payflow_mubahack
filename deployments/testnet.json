@@ -1,0 +1,91 @@
+{
+  "network": "testnet",
+  "packageId": "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d",
+  "publishedAt": "2026-08-30T03:57:34.436Z",
+  "publisher": "0xa09bfa3a1f78f168c2970cff756592b7376be0ac947d845aedc4c0781d270609",
+  "publishDigest": "3tDrm1eGr6vMVkqEu1h35338i24ELra7bx9pn5HphGTd",
+  "coinType": "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d::mock_usdc::MOCK_USDC",
+  "cliVersion": "sui 1.78.1-722ac4fcf484",
+  "objects": {
+    "treasuryId": "0x15f45303f80c591ea9777da30386c650df73a9277e478f43e128af123a57dd5a",
+    "treasuryOwnerCapId": "0xa732e503bbefcac9f8cd958c5b57c80e6cd86a5d69f29e2beafff717a32598ca",
+    "supplierRegistryId": "0xf37754631294381e009d00fcf0ebc1d400f0db941af5857a2e2de40d78b38fb8",
+    "cashFlowCalendarId": "0x242645c276b89d0817cf424489683a25e8df7f67f4333cbc33d8bd143afaa255",
+    "agentCapId": "0x780434ab1f1930878707aed3e6eca3101c5e61f56f6ace50e4358601b12ccb85",
+    "approverCapId": "0xd49eec6ddb750da1cb0b2a2eb2ea8d3a2bf57cf282e2d5abe224faf02c3f0ebf",
+    "mockUsdcTreasuryCapId": "0xb8076a8e437eb2afdc5a1ff32127745dfa0174942f42266d8d8688174a7e7581",
+    "coinMetadataId": "0x1b9167a89d89e5cdde6e66e53d1c7e34dde965a89d25ca3c25488cc76c106e1c"
+  },
+  "initialPolicy": {
+    "maxAgentPaymentCents": 500000,
+    "dailyAgentLimitCents": 2000000,
+    "humanApprovalThresholdCents": 500000,
+    "minimumReserveCents": 5000000,
+    "allowedCurrencies": [
+      "USD"
+    ],
+    "maxRecommendationAgeMs": 86400000
+  },
+  "seed": {
+    "seededAt": "2026-08-30T04:09:34.609Z",
+    "supplierIds": [
+      "sup_northwind",
+      "sup_kestrel",
+      "sup_lumen",
+      "sup_atlas",
+      "sup_veritas"
+    ],
+    "invoices": [
+      {
+        "invoiceNumber": "INV-2026-3455",
+        "objectId": "0x3124042beb52a69d178958037436e2d063e2739abd01ab94593396d71fdd710b",
+        "amountCents": 300000,
+        "supplierId": "sup_northwind"
+      },
+      {
+        "invoiceNumber": "INV-2026-3461",
+        "objectId": "0x147a9bdc3c1c8502c88aa21d008abb14649de503e1b1de7be96a9063c6c5694e",
+        "amountCents": 3000000,
+        "supplierId": "sup_lumen"
+      },
+      {
+        "invoiceNumber": "INV-2026-3468",
+        "objectId": "0x71b592b7fd18308779b30528fd23ccc9efb80950f8368ffc94bf8dec1e192140",
+        "amountCents": 480000,
+        "supplierId": "sup_lumen"
+      },
+      {
+        "invoiceNumber": "INV-BP-88214",
+        "objectId": "0xf316b178daab047e39cf8502ad179fee92a1a7d23beaefa3d4e0800c3c05107f",
+        "amountCents": 1475000,
+        "supplierId": "BLUEPEAK INDUSTRIAL SUPPLY"
+      },
+      {
+        "invoiceNumber": "INV-2026-3479",
+        "objectId": "0x139b517c013d8edf5d29e4785c27316612495706f026e159352356efcc67f9ca",
+        "amountCents": 1950000,
+        "supplierId": "sup_atlas"
+      },
+      {
+        "invoiceNumber": "INV-2026-3391",
+        "objectId": "0xd6ce54cb467961a2549069cbd7a23f937604f53d6ffc9e26f2a31268bda6be27",
+        "amountCents": 2260000,
+        "supplierId": "sup_lumen"
+      },
+      {
+        "invoiceNumber": "INV-2026-3486",
+        "objectId": "0x99934e3a7e4e6da27dd4d9421793641834df923bc7df07bc722bac8b00a1019d",
+        "amountCents": 1470000,
+        "supplierId": "sup_atlas"
+      },
+      {
+        "invoiceNumber": "INV-2026-3492",
+        "objectId": "0x1cb9fd04484c4453c0c3f440613444e055b63315447b2410e316ff0e79bbbe46",
+        "amountCents": 800000,
+        "supplierId": "sup_kestrel"
+      }
+    ],
+    "cashFlowEventCount": 6,
+    "vaultFundedCents": 10000000
+  }
+}

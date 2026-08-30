@@ -1,0 +1,11 @@
+[package]
+name = "payflow"
+edition = "2024"
+license = "Apache-2.0"
+
+# The Sui framework is an implicit dependency from CLI 1.45 onward, so this is
+# deliberately empty. Pinned toolchain: sui 1.78.1 (testnet).
+[dependencies]
+
+[addresses]
+payflow = "0x0"

@@ -69,6 +69,7 @@ function escalation(
         partial?.riskExplanation ??
         "Risk could not be established because the model response failed validation.",
       cashFlowExplanation: partial?.cashFlowExplanation ?? "",
+      whyNotTodayExplanation: "",
       decisionExplanation: `Escalated to human review by the decision guard. ${summary}`.trim(),
     },
     violations,
@@ -203,6 +204,9 @@ export function validateDecision(
       reasons: reasons.slice(0, MAX_REASONS),
       riskExplanation: clean(body.riskExplanation, MAX_EXPLANATION_LENGTH),
       cashFlowExplanation: clean(body.cashFlowExplanation, MAX_EXPLANATION_LENGTH),
+      // Soft field: absent in recordings made before it existed, and absent
+      // whenever the model is recommending payment today. Never a violation.
+      whyNotTodayExplanation: clean(body.whyNotToday, MAX_EXPLANATION_LENGTH),
       decisionExplanation: clean(body.decisionExplanation, MAX_EXPLANATION_LENGTH),
     },
     violations: [],

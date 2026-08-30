@@ -57,7 +57,7 @@ describe("extractInvoice", () => {
     const facts = extractInvoice(DEMO_DOCUMENTS.normal, AS_OF);
     expect(facts.invoiceNumber).toBe("INV-2026-3455");
     expect(facts.supplierName).toBe("NORTHWIND COMPONENTS LTD");
-    expect(facts.amountCents).toBe(dollars(12_400));
+    expect(facts.amountCents).toBe(dollars(3_000));
     expect(facts.currency).toBe("USD");
     expect(facts.dueDate).toBe("2026-08-31");
     expect(facts.daysUntilDue).toBe(2);
@@ -70,8 +70,8 @@ describe("extractInvoice", () => {
   it("extracts an early-payment discount as an exact amount", () => {
     const facts = extractInvoice(DEMO_DOCUMENTS.discount, AS_OF);
     expect(facts.discount).toEqual({
-      percent: 2,
-      amountCents: dollars(600),
+      percent: 5,
+      amountCents: dollars(240),
       deadline: "2026-08-29",
       daysUntilDeadline: 0,
     });
@@ -215,10 +215,10 @@ describe("candidate date simulation", () => {
     const today = analysis.cashFlowScenarios.find((c) => c.paymentDate === "2026-08-29")!;
     const dueDate = analysis.cashFlowScenarios.find((c) => c.paymentDate === "2026-09-23")!;
 
-    expect(today.discountCapturedCents).toBe(dollars(600));
-    expect(today.paymentAmountCents).toBe(dollars(29_400));
+    expect(today.discountCapturedCents).toBe(dollars(240));
+    expect(today.paymentAmountCents).toBe(dollars(4_560));
     expect(dueDate.discountCapturedCents).toBe(0);
-    expect(dueDate.paymentAmountCents).toBe(dollars(30_000));
+    expect(dueDate.paymentAmountCents).toBe(dollars(4_800));
   });
 
   it("never offers a date after the due date", async () => {
@@ -236,7 +236,10 @@ describe("candidate date simulation", () => {
 });
 
 describe("policy facts", () => {
-  it("flags only scenario 8 as exceeding the single-payment cap", async () => {
+  it("flags exactly the invoices above the agent's single-payment cap", async () => {
+    // With the cap at $5,000 only the two smallest invoices are inside it —
+    // which is what makes s1 and s3 the genuinely autonomous demonstrations.
+    const within: string[] = [];
     const exceeding: string[] = [];
     for (const scenario of SCENARIOS) {
       const analysis = await buildAnalysis({
@@ -244,8 +247,11 @@ describe("policy facts", () => {
         world: scenario.world,
         asOf: scenario.asOfDate,
       });
-      if (analysis.policyFacts.wouldExceedSingleLimit) exceeding.push(scenario.id);
+      (analysis.policyFacts.wouldExceedSingleLimit ? exceeding : within).push(scenario.id);
     }
-    expect(exceeding).toEqual(["s8_policy_violation"]);
+
+    expect(within).toEqual(["s1_normal", "s3_discount"]);
+    expect(exceeding).toContain("s8_policy_violation");
+    expect(exceeding).toContain("s2_cashflow");
   });
 });

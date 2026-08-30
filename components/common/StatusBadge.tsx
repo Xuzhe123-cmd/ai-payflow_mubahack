@@ -42,8 +42,11 @@ export function describeOutcome(outcome: FinalOutcome): StatusDescriptor {
       return { label: "Approved", tone: "positive" };
     case "SCHEDULED":
       return { label: "Scheduled", tone: "chain" };
+    // Every chain check passed — what is missing is a person, not a permission.
+    case "AWAITING_APPROVAL":
+      return { label: "Awaiting approval", tone: "warning" };
     case "HUMAN_REVIEW":
-      return { label: "Needs review", tone: "warning" };
+      return { label: "Human approval", tone: "warning" };
     case "REJECTED":
       return { label: "Rejected", tone: "negative" };
     case "SUI_REJECT":

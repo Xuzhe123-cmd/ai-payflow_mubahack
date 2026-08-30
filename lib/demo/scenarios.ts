@@ -8,6 +8,11 @@
  * All eight share the same TREASURY_POLICY and AGENT_CAPABILITY, so scenario 8
  * trips the on-chain ceiling because its invoice is genuinely larger, not
  * because its policy was weakened to stage the demo.
+ *
+ * With the agent capped at $5,000 and the human-approval threshold at the same
+ * figure, scenarios divide three ways by amount alone: s1 and s3 are small
+ * enough for the agent to settle on its own, s2 is large enough to require a
+ * person, and s8 is large enough that the agent's attempt is refused outright.
  */
 
 import type { Scenario, WorldSnapshot } from "../types";
@@ -16,7 +21,7 @@ import { SUPPLIERS } from "./suppliers";
 import { PURCHASE_ORDERS } from "./purchaseOrders";
 import { PAYMENT_HISTORY } from "./paymentHistory";
 import { TREASURY_PROFILES, type TreasuryProfile } from "./cashFlow";
-import { AGENT_CAPABILITY, TREASURY_POLICY } from "./policies";
+import { AGENT_CAPABILITY, APPROVER_AUTHORITY, TREASURY_POLICY } from "./policies";
 
 /** Every scenario shares one "today" so the fixtures stay comparable. */
 export const DEMO_AS_OF_DATE = "2026-08-29";
@@ -30,6 +35,7 @@ function world(profile: TreasuryProfile): WorldSnapshot {
     treasury: profile.treasury,
     policy: TREASURY_POLICY,
     capability: AGENT_CAPABILITY,
+    approver: APPROVER_AUTHORITY,
   };
 }
 
@@ -56,7 +62,7 @@ export const SCENARIOS: Scenario[] = [
     id: "s3_discount",
     name: "Early-payment discount",
     description:
-      "Approved supplier offering 2% for payment by today, with liquidity comfortable enough to take it.",
+      "Approved supplier offering 5% for payment by today, with liquidity comfortable enough to take it.",
     asOfDate: DEMO_AS_OF_DATE,
     document: DEMO_DOCUMENTS.discount,
     world: world(TREASURY_PROFILES.discount),
@@ -101,7 +107,7 @@ export const SCENARIOS: Scenario[] = [
     id: "s8_policy_violation",
     name: "Policy violation",
     description:
-      "Clean, well-funded $68,000 invoice that exceeds the agent's $50,000 on-chain single-payment cap.",
+      "Clean, well-funded $8,000 invoice that exceeds the agent's $5,000 on-chain single-payment cap.",
     asOfDate: DEMO_AS_OF_DATE,
     document: DEMO_DOCUMENTS.policyViolation,
     world: world(TREASURY_PROFILES.wellFunded),

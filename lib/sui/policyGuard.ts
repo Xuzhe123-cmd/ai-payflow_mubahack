@@ -11,13 +11,13 @@
  * failures. `violations` remains the derived list of failed checks — callers
  * that only care about rejection are unaffected.
  *
- * In Phase 6 the body is replaced by a Sui dry-run of the same Move function.
- * The signature, the violation codes, and the check order stay as they are, so
- * nothing upstream changes.
+ * The body is later replaced by a devInspect of the Move `evaluate()` function,
+ * which returns the same ten results in the same order. The signature, the
+ * violation codes, and the check order stay as they are, so nothing upstream
+ * changes: authority moves to the chain, the prose stays here.
  */
 
 import type {
-  AgentCapability,
   Cents,
   PaymentRecord,
   PaymentRequest,
@@ -29,15 +29,28 @@ import type {
   TreasuryPolicy,
   TreasuryState,
 } from "../types";
+import type { Limits } from "./limits";
 import { formatMoneyRounded } from "../util/money";
 
 export interface EnforcementContext {
   request: PaymentRequest;
-  capability: Readonly<AgentCapability>;
+  /**
+   * The limits this payment is measured against, and which authority they came
+   * from. Derived by limitsFor() from the treasury's policy — never from the
+   * request, and never from anything the AI produced.
+   */
+  limits: Readonly<Limits>;
   policy: Readonly<TreasuryPolicy>;
   treasury: Readonly<TreasuryState>;
   suppliers: readonly Supplier[];
   paymentHistory: readonly PaymentRecord[];
+  /**
+   * The instant enforcement runs, in epoch milliseconds. Passed in rather than
+   * read from the clock so this stays pure; on chain it becomes
+   * clock::timestamp_ms. Omit it and the expiry check is skipped, which is the
+   * correct reading of "this caller has no notion of now".
+   */
+  nowMs?: number;
 }
 
 interface CheckInput {
@@ -53,7 +66,7 @@ interface CheckInput {
 }
 
 export function enforcePolicy(ctx: EnforcementContext): PolicyEnforcementResult {
-  const { request, capability, policy, treasury, suppliers, paymentHistory } = ctx;
+  const { request, limits, policy, treasury, suppliers, paymentHistory, nowMs } = ctx;
   const currency = request.currency || "USD";
   const money = (cents: Cents) => formatMoneyRounded(cents, currency);
 
@@ -69,20 +82,30 @@ export function enforcePolicy(ctx: EnforcementContext): PolicyEnforcementResult 
     });
   };
 
+  const underApproval = limits.authority === "HUMAN_APPROVAL";
+
   record({
     code: "AGENT_NOT_AUTHORIZED",
-    label: "Agent authorized",
-    passed: capability.authorized,
-    passDetail: `Agent ${request.agentId} holds a capability on this treasury.`,
-    failDetail: `Agent ${request.agentId} is not authorized on this treasury.`,
+    label: underApproval ? "Approver authorized" : "Agent authorized",
+    passed: limits.authorized,
+    passDetail: underApproval
+      ? `This payment is above the ${money(policy.humanApprovalThresholdCents)} threshold and carries a human approval.`
+      : `Agent ${request.agentId} holds a capability on this treasury.`,
+    failDetail: underApproval
+      ? "No valid human approval was presented for this payment."
+      : `Agent ${request.agentId} is not authorized on this treasury.`,
   });
 
   record({
     code: "CAPABILITY_DISABLED",
-    label: "Capability enabled",
-    passed: capability.enabled,
-    passDetail: "The agent capability is enabled.",
-    failDetail: `Agent capability for ${request.agentId} is currently disabled.`,
+    label: underApproval ? "Approval still valid" : "Capability enabled",
+    passed: limits.enabled,
+    passDetail: underApproval
+      ? "The human approval has not been revoked."
+      : "The agent capability is enabled.",
+    failDetail: underApproval
+      ? "The human approval for this payment has been revoked."
+      : `Agent capability for ${request.agentId} is currently disabled.`,
   });
 
   // Supplier authorization is re-checked here, independently of the AI.
@@ -114,25 +137,25 @@ export function enforcePolicy(ctx: EnforcementContext): PolicyEnforcementResult 
     actual: request.recipientWallet,
   });
 
-  const exceedsSingle = request.amountCents > capability.maxSinglePaymentCents;
+  const exceedsSingle = request.amountCents > limits.maxSinglePaymentCents;
   record({
     code: "EXCEEDS_MAX_PAYMENT",
     label: "Within single-payment limit",
     passed: !exceedsSingle,
-    passDetail: `${money(request.amountCents)} is within the agent's ${money(capability.maxSinglePaymentCents)} cap.`,
-    failDetail: `Payment of ${money(request.amountCents)} exceeds the agent's single-payment cap of ${money(capability.maxSinglePaymentCents)}.`,
-    limit: money(capability.maxSinglePaymentCents),
+    passDetail: `${money(request.amountCents)} is within ${limits.holder}'s ${money(limits.maxSinglePaymentCents)} cap.`,
+    failDetail: `Payment of ${money(request.amountCents)} exceeds ${limits.holder}'s single-payment cap of ${money(limits.maxSinglePaymentCents)}.`,
+    limit: money(limits.maxSinglePaymentCents),
     actual: money(request.amountCents),
   });
 
-  const projectedDaily = capability.dailySpentCents + request.amountCents;
+  const projectedDaily = limits.dailySpentCents + request.amountCents;
   record({
     code: "EXCEEDS_DAILY_LIMIT",
     label: "Within daily limit",
-    passed: projectedDaily <= capability.dailyLimitCents,
-    passDetail: `Today's spend would reach ${money(projectedDaily)} of ${money(capability.dailyLimitCents)}.`,
-    failDetail: `Payment of ${money(request.amountCents)} would take today's spend to ${money(projectedDaily)}, above the ${money(capability.dailyLimitCents)} daily limit.`,
-    limit: money(capability.dailyLimitCents),
+    passed: projectedDaily <= limits.dailyLimitCents,
+    passDetail: `Today's spend would reach ${money(projectedDaily)} of ${money(limits.dailyLimitCents)}.`,
+    failDetail: `Payment of ${money(request.amountCents)} would take today's spend to ${money(projectedDaily)}, above the ${money(limits.dailyLimitCents)} daily limit.`,
+    limit: money(limits.dailyLimitCents),
     actual: money(projectedDaily),
   });
 
@@ -166,6 +189,25 @@ export function enforcePolicy(ctx: EnforcementContext): PolicyEnforcementResult 
     failDetail: `Paying ${money(request.amountCents)} would leave ${money(remaining)}, below the ${money(policy.minimumReserveCents)} minimum reserve.`,
     limit: money(policy.minimumReserveCents),
     actual: money(remaining),
+  });
+
+  // An AI recommendation is intent, not standing permission. A scheduled
+  // payment can sit for days before it executes, and by then the reasoning
+  // behind it may describe a treasury that no longer exists.
+  const expired = nowMs !== undefined && nowMs > request.expiresAtMs;
+  const ageHours =
+    nowMs !== undefined ? Math.round((nowMs - request.recommendedAtMs) / 3_600_000) : 0;
+  record({
+    code: "RECOMMENDATION_EXPIRED",
+    label: "Recommendation still current",
+    passed: !expired,
+    passDetail:
+      nowMs === undefined
+        ? "Immediate payment — no expiry applies."
+        : `Recommendation ${request.recommendationId} was made ${ageHours}h ago and is still within its validity window.`,
+    failDetail: `Recommendation ${request.recommendationId} expired ${Math.round((nowMs! - request.expiresAtMs) / 3_600_000)}h ago and must be re-derived from current state.`,
+    limit: nowMs === undefined ? null : new Date(request.expiresAtMs).toISOString(),
+    actual: nowMs === undefined ? null : new Date(nowMs).toISOString(),
   });
 
   const violations: PolicyViolation[] = checks

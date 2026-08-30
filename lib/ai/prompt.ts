@@ -40,6 +40,7 @@ A finance manager reads this, so write plain English.
 - reasons: three to six short sentences. Never a bare code name — write "The remit wallet does not match the one on file for this supplier", not "WALLET_MISMATCH".
 - riskExplanation: what makes this payment safe or unsafe. Do not discuss timing here.
 - cashFlowExplanation: the liquidity reasoning behind the date you chose, quoting the projected minimum cash for that date. If you are not recommending a payment, say instead why timing is not what decides this invoice.
+- whyNotToday: only when you chose a date later than today. Answer the question a finance manager will actually ask — "why are we not just paying this now?" — by comparing the two: what today's projection does to the cash position, and what waiting buys. Quote both projected minimum cash figures. If waiting gives up an early-payment discount, say so plainly rather than omitting it. Leave this empty when you are paying today or recommending no payment.
 - decisionExplanation: two or three sentences on why this action.
 - confidence: how sure you are. Say so honestly — a low number on an escalation is useful information, not a failure.
 

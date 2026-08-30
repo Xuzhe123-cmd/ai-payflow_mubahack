@@ -40,9 +40,9 @@ Purchase Order:    PO-2026-0412
 Payment Terms:     Net 7
 
 Description                                          Amount
-Bearing assemblies, batch 44                      12,400.00
+Bearing assemblies, batch 44                       3,000.00
                                                  ----------
-Total Due (USD)                                   12,400.00
+Total Due (USD)                                    3,000.00
 
 Remit to wallet: ${WALLETS.northwind}
 Thank you for your continued business.`,
@@ -88,14 +88,14 @@ Invoice Number:    INV-2026-3468
 Issue Date:        2026-08-24
 Due Date:          2026-09-23
 Purchase Order:    PO-2026-0511
-Payment Terms:     2/5 Net 30
+Payment Terms:     5/5 Net 30
 
 Description                                          Amount
-Powder coating line, phase 2                      30,000.00
+Powder coating line, phase 2                       4,800.00
                                                  ----------
-Total Due (USD)                                   30,000.00
+Total Due (USD)                                    4,800.00
 
-Early Payment Discount: 2% if paid by 2026-08-29
+Early Payment Discount: 5% if paid by 2026-08-29
 
 Remit to wallet: ${WALLETS.lumen}`,
 };
@@ -221,9 +221,9 @@ Purchase Order:    PO-2026-0455
 Payment Terms:     Net 23
 
 Description                                          Amount
-Q3 freight and customs handling                   68,000.00
+Q3 freight and customs handling                    8,000.00
                                                  ----------
-Total Due (USD)                                   68,000.00
+Total Due (USD)                                    8,000.00
 
 Remit to wallet: ${WALLETS.kestrel}`,
 };

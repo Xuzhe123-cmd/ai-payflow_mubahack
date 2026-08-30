@@ -9,11 +9,17 @@ import type { PipelineOptions } from "../pipeline";
 import type { PipelineRun, Scenario, TreasuryDecisionEngine } from "../types";
 import { runPipeline } from "../pipeline";
 
+export interface RunScenarioOptions extends PipelineOptions {
+  /** Submit under the agent's own capability — see PipelineInput. */
+  forceAgentAuthority?: boolean;
+}
+
 export function runScenario(
   scenario: Scenario,
   engine: TreasuryDecisionEngine,
-  options: PipelineOptions = {},
+  options: RunScenarioOptions = {},
 ): Promise<PipelineRun> {
+  const { forceAgentAuthority, ...pipelineOptions } = options;
   return runPipeline(
     {
       scenarioId: scenario.id,
@@ -21,7 +27,8 @@ export function runScenario(
       world: scenario.world,
       asOf: scenario.asOfDate,
       engine,
+      forceAgentAuthority,
     },
-    options,
+    pipelineOptions,
   );
 }

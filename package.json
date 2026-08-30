@@ -14,12 +14,18 @@
     "record:llm": "tsx scripts/recordLlm.ts",
     "scenarios": "tsx scripts/scenarios.ts",
     "prompt": "tsx scripts/showPrompt.ts",
-    "check:ai": "tsx scripts/checkAi.ts"
+    "check:ai": "tsx scripts/checkAi.ts",
+    "move:build": "sui move build --path move/payflow",
+    "move:test": "sui move test --path move/payflow",
+    "deploy": "tsx scripts/deploy.ts",
+    "seed": "tsx scripts/seed.ts",
+    "verify:deployment": "tsx scripts/verifyDeployment.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@hugeicons/core-free-icons": "^4.3.0",
     "@hugeicons/react": "^1.1.10",
+    "@mysten/sui": "^2.27.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "convex": "^1.44.0",

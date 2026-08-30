@@ -20,6 +20,10 @@ import {
 import { buildProjection } from "@/lib/deterministic/projection";
 import { SCENARIOS, scenarioById } from "@/lib/demo/scenarios";
 import { runScenario } from "@/lib/demo/runScenario";
+import { readChainSnapshot } from "@/lib/sui/chainReader";
+import { worldFromChain } from "@/lib/sui/chainWorld";
+import { createSuiQueries } from "@/lib/sui/client";
+import { configuredNetwork, loadManifest } from "@/lib/sui/manifest";
 import type { AnalysisResponse } from "@/lib/services/contracts";
 
 export const runtime = "nodejs";
@@ -72,7 +76,26 @@ export async function POST(request: Request) {
       }
     : selectDecisionEngine(process.env);
 
-  const run = await runScenario(scenario, selection.engine);
+  // Prefer the live treasury. The scenario still supplies the invoice DOCUMENT
+  // — the chain holds no document text — but every figure that decides the
+  // payment comes from testnet: balances, limits, supplier status, registered
+  // wallets, and which invoices are already settled.
+  //
+  // Falling back to the fixture world keeps the app runnable with no
+  // deployment, and the response says which one was used rather than leaving it
+  // to be inferred.
+  let world = scenario.world;
+  let worldSource: "chain" | "fixture" = "fixture";
+  try {
+    const network = configuredNetwork();
+    const snapshot = await readChainSnapshot(createSuiQueries(network), loadManifest(network));
+    world = worldFromChain(snapshot);
+    worldSource = "chain";
+  } catch {
+    // Left as the fixture world; reported below.
+  }
+
+  const run = await runScenario({ ...scenario, world }, selection.engine);
 
   const engineMode: EngineMode =
     run.decision.engine === "FALLBACK" ? "fallback" : wantsRecorded ? "recorded" : "live";
@@ -80,7 +103,7 @@ export async function POST(request: Request) {
   // Display-only projection, built from the same forecast the decision used so
   // the chart and the recommendation can never disagree.
   const projection = buildProjection({
-    world: scenario.world,
+    world,
     asOf: scenario.asOfDate,
     payment: {
       amountCents: run.analysis.invoiceFacts.amountCents,
@@ -89,6 +112,7 @@ export async function POST(request: Request) {
   });
 
   const payload: AnalysisResponse = {
+    worldSource,
     scenarioId: run.scenarioId,
     scenario: {
       id: scenario.id,
@@ -99,7 +123,7 @@ export async function POST(request: Request) {
     // The engine is surfaced so the UI can never present a fallback as AI.
     engine: run.decision.engine,
     engineMode,
-    engineNotice: selection.live ? null : selection.reason,
+    engineNotice: selection.live ? (run.decision.engineFailure ?? null) : selection.reason,
     modelId: run.decision.modelId,
     latencyMs: run.decision.latencyMs,
     document: scenario.document,
@@ -107,6 +131,7 @@ export async function POST(request: Request) {
     decision: run.decision.decision,
     guard: run.decision.guard,
     projection,
+    recommendation: run.recommendation,
     paymentRequest: run.paymentRequest,
     enforcement: run.enforcement,
     finalOutcome: run.finalOutcome,

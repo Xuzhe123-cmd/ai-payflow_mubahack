@@ -4,8 +4,13 @@
  * All eight demo scenarios run this exact function — the scenario only changes
  * the input data. There is no per-scenario branch anywhere below.
  *
- *   deterministic facts  ->  AI decision  ->  Sui policy enforcement
- *   "what is true?"          "what to do?"    "are we allowed to?"
+ *   deterministic facts -> AI decision -> recommendation -> Sui enforcement
+ *   "what is true?"        "what to do?"   "what should?"    "what can?"
+ *
+ * The recommendation is a deliberate step rather than a rename. It is the AI's
+ * advisory output, and it is always produced — including for REJECT. Only
+ * AUTO_PAY and SCHEDULE go on to become a PaymentRequest, which is the only
+ * artifact the chain ever judges.
  */
 
 import type {
@@ -21,6 +26,8 @@ import type {
   WorldSnapshot,
 } from "./types";
 import { buildAnalysis } from "./deterministic/buildAnalysis";
+import { buildPaymentRecommendation } from "./ai/recommendation";
+import { authorityFor, limitsFor } from "./sui/limits";
 import { buildPaymentRequest } from "./sui/paymentRequest";
 import { enforcePolicy } from "./sui/policyGuard";
 import type { SuiPolicyReader } from "./sui/policyReader";
@@ -33,6 +40,14 @@ export interface PipelineInput {
   asOf: IsoDate;
   engine: TreasuryDecisionEngine;
   policyReader?: SuiPolicyReader;
+  /**
+   * Judge the payment under the agent's own capability even when policy would
+   * route it to a human approver. Used by the security demonstration and by the
+   * invariant tests to submit a payment the agent is not allowed to make.
+   *
+   * Only ever MORE restrictive. There is no flag in the other direction.
+   */
+  forceAgentAuthority?: boolean;
 }
 
 export interface PipelineOptions {
@@ -76,9 +91,13 @@ export async function runPipeline(
     describeDecision(decision),
   );
 
+  // ---- Recommendation layer ------------------------------------------------
+  // Advisory. Always produced, never permission to move funds.
+  const recommendation = buildPaymentRecommendation(decision.decision, analysis, clock());
+
   // ---- Sui / Move layer ----------------------------------------------------
   const paymentRequest = buildPaymentRequest(
-    decision.decision,
+    recommendation,
     analysis,
     input.world.capability.agentId,
   );
@@ -94,27 +113,45 @@ export async function runPipeline(
       `Not submitted — the AI chose ${decision.decision.action}, which never creates a payment request.`,
     );
   } else {
+    // Which authority this payment runs under is decided by the treasury's own
+    // policy and the amount — never by the request, and never by the AI.
+    const authority = authorityFor(
+      paymentRequest.amountCents,
+      decision.decision.action,
+      input.world.policy,
+      input.forceAgentAuthority,
+    );
+    const limits = limitsFor(authority, input.world.capability, input.world.approver);
+
     enforcement = enforcePolicy({
       request: paymentRequest,
-      capability: input.world.capability,
+      limits,
       policy: input.world.policy,
       treasury: input.world.treasury,
       suppliers: input.world.suppliers,
       paymentHistory: input.world.paymentHistory,
+      nowMs: clock(),
     });
 
     if (enforcement.outcome === "SUI_REJECT") {
       finalOutcome = "SUI_REJECT";
+    } else if (authority === "HUMAN_APPROVAL") {
+      // Every check passes, but the agent's capability alone cannot authorize
+      // this size of payment. A person has to sign before it can execute.
+      finalOutcome = "AWAITING_APPROVAL";
     } else {
       finalOutcome = decision.decision.action === "AUTO_PAY" ? "EXECUTED" : "SCHEDULED";
     }
 
+    const amount = formatMoneyRounded(paymentRequest.amountCents, paymentRequest.currency);
     emit(
       "policy_enforce",
       "Sui policy enforcement",
-      enforcement.outcome === "APPROVED"
-        ? `Approved — payment of ${formatMoneyRounded(paymentRequest.amountCents, paymentRequest.currency)} on ${paymentRequest.requestedDate}.`
-        : `REJECTED on chain — ${enforcement.violations.map((v) => v.code).join(", ")}.`,
+      enforcement.outcome !== "APPROVED"
+        ? `REJECTED on chain — ${enforcement.violations.map((v) => v.code).join(", ")}.`
+        : authority === "HUMAN_APPROVAL"
+          ? `Checks pass, but ${amount} is above the ${formatMoneyRounded(input.world.policy.humanApprovalThresholdCents, paymentRequest.currency)} threshold — a human approval is required before execution.`
+          : `Approved — payment of ${amount} on ${paymentRequest.requestedDate}.`,
     );
   }
 
@@ -123,6 +160,7 @@ export async function runPipeline(
     asOfDate: input.asOf,
     analysis,
     decision,
+    recommendation,
     paymentRequest,
     enforcement,
     finalOutcome,
