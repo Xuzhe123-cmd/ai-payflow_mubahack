@@ -288,15 +288,39 @@ describe("above the autonomous limit, a person authorizes and then executes", ()
     expect(state.fundsLocked).toBe(false);
   });
 
-  it("refuses when a person approved and the chain still said no", () => {
-    // Approval raises WHO may authorize an amount. It does not switch off
-    // treasury policy, and the interface must not imply that it does.
+  it("refuses when the preflight says no, and does not pretend anyone approved", () => {
+    // SUI_REJECT is reached BEFORE any approval is minted, so this test used to
+    // carry the same false premise the UI did — its own name said "a person
+    // approved". Nobody did. The security claim it guards is still the real
+    // one: approval raises WHOSE limit applies, never the limit itself.
     const state = availablePaymentAction(
       input({ autonomy: NEEDS_HUMAN, humanApproval: { outcome: "SUI_REJECT" } }),
     );
     expect(state.action).toBe("NONE");
     expect(offersPaymentControl(state)).toBe(false);
-    expect(state.detail).toMatch(/raises the authority limit, not the rules/i);
+    expect(state.detail).toMatch(/raises WHOSE limit applies, never the limit itself/i);
+    expect(state.detail).toMatch(/no human approval transaction was submitted/i);
+  });
+
+  it("never claims a transaction was submitted or rejected on chain", () => {
+    // SUI_REJECT is the verdict of the policy mirror and the preflight. Nothing
+    // reached a validator, so no field may describe a chain event or a
+    // settlement — "REJECTED ON CHAIN" beside a $30,000 figure read as a
+    // payment that failed rather than one never attempted.
+    const state = availablePaymentAction(
+      input({ autonomy: NEEDS_HUMAN, humanApproval: { outcome: "SUI_REJECT" } }),
+    );
+    const text = [state.headline, state.status, state.detail, state.lead ?? "", ...state.facts]
+      .join(" ")
+      .toLowerCase();
+
+    expect(state.headline).toBe("WOULD BE REFUSED BY SUI");
+    expect(text).not.toContain("refused on chain");
+    expect(text).not.toContain("rejected on chain");
+    expect(text).toContain("no transaction was submitted");
+    expect(text).toContain("no funds moved");
+    // And the security claim survives the rewording.
+    expect(text).toContain("does not bypass treasury policy");
   });
 
   it("stops entirely when a person declined", () => {

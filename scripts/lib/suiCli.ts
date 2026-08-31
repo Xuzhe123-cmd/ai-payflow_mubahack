@@ -23,6 +23,38 @@ export type AllowedNetwork = (typeof ALLOWED_NETWORKS)[number];
 export const DEFAULT_GAS_BUDGET = process.env.PAYFLOW_GAS_BUDGET ?? "500000000";
 
 /**
+ * Ask the CLI to size the budget itself.
+ *
+ * Passed as `gasBudget` instead of a number. The CLI then dry-runs the call,
+ * reads the real cost, and executes with that — so a small call reserves a
+ * small budget instead of the 0.5 SUI `DEFAULT_GAS_BUDGET` reserves for the
+ * publish it was chosen for.
+ *
+ * WHY THAT MATTERS FOR GAS SELECTION, WHICH IS THE ACTUAL BUG. The budget is
+ * not what a transaction spends; it is what it must be able to PAY, and gas
+ * selection has to find coins covering it up front. A 0.5 SUI budget on a call
+ * that costs 0.003 SUI demands a 0.5 SUI coin to exist before the CLI will
+ * even try, and refuses outright when the wallet holds only smaller ones. The
+ * fee was never the problem — the reservation was.
+ *
+ * Kept opt-in. `DEFAULT_GAS_BUDGET` stays where it is because publish and
+ * upgrade genuinely need a large one, and estimation costs an extra round trip
+ * that a batch script has no reason to pay.
+ */
+export const AUTO_GAS_BUDGET = "auto";
+
+/**
+ * The `--gas-budget` flag, or nothing at all.
+ *
+ * Omitting the flag is what triggers the CLI's own estimation, so "auto" has to
+ * become an ABSENT argument rather than a value.
+ */
+function gasBudgetArgs(gasBudget: string | undefined): string[] {
+  const budget = gasBudget ?? DEFAULT_GAS_BUDGET;
+  return budget === AUTO_GAS_BUDGET ? [] : ["--gas-budget", budget];
+}
+
+/**
  * Carries what the CLI actually said, not what Node summarised.
  *
  * Node truncates the failing command into `error.message` — which is why a
@@ -329,6 +361,7 @@ export interface CallOptions {
   function: string;
   typeArgs?: string[];
   args?: string[];
+  /** MIST, or `AUTO_GAS_BUDGET` to let the CLI estimate. */
   gasBudget?: string;
 }
 
@@ -344,7 +377,7 @@ export function renderCall(options: CallOptions): string {
   if (options.args?.length) {
     parts.push(`--args ${options.args.map((arg) => JSON.stringify(arg)).join(" ")}`);
   }
-  parts.push(`--gas-budget ${options.gasBudget ?? DEFAULT_GAS_BUDGET}`);
+  parts.push(...gasBudgetArgs(options.gasBudget));
   return parts.join(" ");
 }
 
@@ -361,7 +394,7 @@ export function call(options: CallOptions): TxResponse {
   ];
   if (options.typeArgs?.length) args.push("--type-args", ...options.typeArgs);
   if (options.args?.length) args.push("--args", ...options.args);
-  args.push("--gas-budget", options.gasBudget ?? DEFAULT_GAS_BUDGET, "--json");
+  args.push(...gasBudgetArgs(options.gasBudget), "--json");
 
   const tx = parseJson<TxResponse>(run(args));
   assertSucceeded(tx, `${options.module}::${options.function}`);
@@ -402,7 +435,7 @@ export function dryRunCall(options: CallOptions): SucceededCall | FailedCall {
   ];
   if (options.typeArgs?.length) args.push("--type-args", ...options.typeArgs);
   if (options.args?.length) args.push("--args", ...options.args);
-  args.push("--gas-budget", options.gasBudget ?? DEFAULT_GAS_BUDGET, "--dry-run", "--json");
+  args.push(...gasBudgetArgs(options.gasBudget), "--dry-run", "--json");
 
   let raw: string;
   try {
@@ -702,7 +735,7 @@ export function callAllowingAbort(options: CallOptions): ExecutionOutcome {
   ];
   if (options.typeArgs?.length) args.push("--type-args", ...options.typeArgs);
   if (options.args?.length) args.push("--args", ...options.args);
-  args.push("--gas-budget", options.gasBudget ?? DEFAULT_GAS_BUDGET, "--json");
+  args.push(...gasBudgetArgs(options.gasBudget), "--json");
 
   let raw: string;
   let status: number | null = 0;

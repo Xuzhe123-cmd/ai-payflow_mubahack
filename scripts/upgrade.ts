@@ -1,5 +1,6 @@
 /**
- * Upgrades the deployed payflow package to add escrow and the shipment oracle.
+ * Upgrades the deployed payflow package to add the Chain-Doi company identity
+ * and scoped, revocable human payment authorization.
  *
  * DRY RUN BY DEFAULT. The bare command touches nothing: it builds, runs the
  * Move suite, verifies the UpgradeCap against live chain state, asks a fullnode
@@ -36,9 +37,9 @@ import {
 import * as sui from "./lib/suiCli";
 
 const PACKAGE_PATH = resolve(process.cwd(), "move/payflow");
-const EXPECTED_MOVE_TESTS = 53;
+const EXPECTED_MOVE_TESTS = 90;
 /** Modules this upgrade introduces. Verified present in the built package. */
-const NEW_MODULES = ["escrow", "oracle"] as const;
+const NEW_MODULES = ["identity"] as const;
 /** An upgrade is a single transaction, but leave room for a fee spike. */
 const MINIMUM_MIST = BigInt(200_000_000);
 
@@ -230,7 +231,10 @@ function printPlan(input: {
   console.log("  PROPOSED");
   console.log(`    new package              (assigned on submit)`);
   console.log(`    version                  ${capVersion + 1}`);
-  console.log(`    new functionality        escrow, oracle, shipment attestation`);
+  console.log(`    new functionality        Chain-Doi company identity,`);
+  console.log(`                             scoped + revocable human authorization`);
+  console.log(`    modified module bodies   treasury, approval, limits`);
+  console.log(`    sealed                   approval::approve (legacy ApproverCap)`);
   console.log("");
   console.log("  EXISTING OBJECTS           PRESERVED (an upgrade alters none)");
   for (const [name, id] of Object.entries(manifest.objects)) {
@@ -247,8 +251,9 @@ function printPlan(input: {
   console.log(`    settlement coin type     ${manifest.coinType}`);
   console.log("");
   console.log("  NOT DONE BY THIS SCRIPT");
-  console.log("    creating the two conditional demo invoices");
-  console.log("    issuing the demo shipment OracleCap");
+  console.log("    creating the Chain-Doi company object");
+  console.log("    adding any company member");
+  console.log("    initialising or granting any approver authorization");
   console.log("    locking, attesting, releasing or refunding any escrow");
   console.log("    (see scripts/seedEscrowDemo.ts, itself dry-run by default)");
 }

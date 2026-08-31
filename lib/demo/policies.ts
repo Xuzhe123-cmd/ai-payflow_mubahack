@@ -36,8 +36,25 @@ export const AGENT_CAPABILITY: AgentCapability = {
  * still policy-constrained, it simply carries a different bound than the
  * agent's. The minimum reserve applies to it exactly as it does to the agent.
  */
+/**
+ * NOT AN AUTHORIZATION. A default for the offline forecast, and nothing more.
+ *
+ * THE BUG THIS CAUSED. `/api/approve` used to measure a human approval against
+ * this figure, so a $30,000 invoice passed a $250,000 constant while the live
+ * on-chain authorization permitted $25,000 — and the interface then offered an
+ * Execute Payment button on the strength of it. A number in a TypeScript file
+ * decided what a person could authorize.
+ *
+ * What decides now: `treasury::approver_can_authorize`, read from the treasury
+ * for the approver's own address. This survives only so the deterministic
+ * pipeline can run offline, against fixture worlds with no chain behind them,
+ * and `/api/approve` overrides it with the chain's figure whenever one exists.
+ *
+ * Lowered to the demo authorization as well, so a fixture run and the chain do
+ * not disagree by a factor of ten even where the override cannot reach.
+ */
 export const APPROVER_AUTHORITY: ApproverAuthority = {
-  maxSinglePaymentCents: dollars(250_000),
-  dailyLimitCents: dollars(250_000),
+  maxSinglePaymentCents: dollars(25_000),
+  dailyLimitCents: dollars(50_000),
   dailySpentCents: 0,
 };

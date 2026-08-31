@@ -23,6 +23,7 @@ import { readChainSnapshot } from "@/lib/sui/chainReader";
 import { worldFromChain } from "@/lib/sui/chainWorld";
 import { createSuiQueries } from "@/lib/sui/client";
 import { limitsFor } from "@/lib/sui/limits";
+import { readApproverLimits } from "@/lib/sui/approverLimits";
 import { configuredNetwork, loadManifest } from "@/lib/sui/manifest";
 import { enforcePolicy } from "@/lib/sui/policyGuard";
 import type { ApprovalResponse } from "@/lib/services/contracts";
@@ -42,6 +43,12 @@ export async function POST(request: Request) {
   const scenarioId =
     typeof body === "object" && body !== null && "scenarioId" in body
       ? (body as { scenarioId: unknown }).scenarioId
+      : undefined;
+  // WHO is approving. Without it there is no address to look an authorization
+  // up under, and the fixture figure would silently stand in for the chain's.
+  const approverAddress =
+    typeof body === "object" && body !== null && "approver" in body
+      ? (body as { approver: unknown }).approver
       : undefined;
   if (typeof scenarioId !== "string") {
     return NextResponse.json({ error: "scenarioId (string) is required." }, { status: 400 });
@@ -106,10 +113,21 @@ export async function POST(request: Request) {
     expiresAtMs: now + 86_400_000,
   };
 
+  // THE CHAIN IS THE SOURCE OF TRUTH FOR WHAT A HUMAN MAY AUTHORIZE.
+  //
+  // The treasury's own approver record is read for this address and used in
+  // place of the fixture figure. Where no record exists the fixture stands, and
+  // the response says which was used — a caller must never have to guess
+  // whether a limit came from the chain or from a constant.
+  const onChain = await readApproverLimits(
+    typeof approverAddress === "string" ? approverAddress : null,
+  );
+  const approverLimits = onChain ?? world.approver;
+
   const enforcement = enforcePolicy({
     request: paymentRequest,
     // The one thing approval changes.
-    limits: limitsFor("HUMAN_APPROVAL", world.capability, world.approver),
+    limits: limitsFor("HUMAN_APPROVAL", world.capability, approverLimits),
     policy: world.policy,
     treasury: world.treasury,
     suppliers: world.suppliers,
@@ -124,7 +142,9 @@ export async function POST(request: Request) {
     enforcement,
     approvedUnder: "HUMAN_APPROVAL",
     agentMaxSinglePaymentCents: world.capability.maxSinglePaymentCents,
-    approverMaxSinglePaymentCents: world.approver.maxSinglePaymentCents,
+    approverMaxSinglePaymentCents: approverLimits.maxSinglePaymentCents,
+    /** Where that ceiling came from. Stated, never inferred. */
+    approverLimitSource: onChain ? "CHAIN" : "FIXTURE",
   };
   return NextResponse.json(payload);
 }

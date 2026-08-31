@@ -87,8 +87,8 @@ export default function TreasuryPage() {
                 />
               </div>
               <p className="mt-2 text-[12px] text-ink-faint">
-                The counter resets each epoch. When it is exhausted, every further
-                agent payment is rejected on chain until it resets.
+                The counter resets each epoch. Once it is exhausted, Sui would refuse
+                every further agent payment until it resets.
               </p>
             </div>
 

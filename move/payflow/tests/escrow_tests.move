@@ -12,7 +12,7 @@ module payflow::escrow_tests;
 use std::string;
 use sui::test_scenario::{Self as ts};
 use payflow::agent::AgentCap;
-use payflow::approval::{Self, ApproverCap, HumanApproval};
+use payflow::approval::{Self, HumanApproval};
 use payflow::escrow::{Self, PaymentEscrow};
 use payflow::invoice::{Self, Invoice};
 use payflow::mock_usdc::MOCK_USDC;
@@ -537,28 +537,49 @@ fun execute_payment_refuses_a_conditional_invoice() {
 fun execute_approved_refuses_a_conditional_invoice() {
     let mut sc = setup_conditional();
 
+    // Membership first: a treasury authorization is not sufficient while the
+    // company does not recognise the approver.
+    let company_id = h::setup_company(&mut sc);
+
     // A genuine approval, from a genuine approver, well within their limit.
     sc.next_tx(h::admin());
     {
-        let vault = sc.take_shared<Treasury<MOCK_USDC>>();
+        let mut vault = sc.take_shared<Treasury<MOCK_USDC>>();
         let cap = sc.take_from_sender<TreasuryOwnerCap>();
-        approval::issue_approver_to(&vault, &cap, h::usd(250_000), h::approver(), sc.ctx());
+        treasury::init_approvers(&mut vault, &cap);
+        treasury::authorize_approver(
+            &mut vault,
+            &cap,
+            h::approver(),
+            h::usd(250_000),
+            h::usd(1_000_000),
+            h::now_ms() + h::day_ms() * 30,
+            vector[],
+            company_id,
+            h::now_ms(),
+        );
         ts::return_shared(vault);
         sc.return_to_sender(cap);
     };
 
     sc.next_tx(h::approver());
     {
-        let cap = sc.take_from_sender<ApproverCap>();
-        approval::approve(
-            &cap,
+        let mut vault = sc.take_shared<Treasury<MOCK_USDC>>();
+        let company = sc.take_shared<payflow::identity::Company>();
+        let clock = h::new_clock(&mut sc, h::now_ms());
+        approval::approve_scoped(
+            &mut vault,
+            &company,
             string::utf8(SHIPPED_INVOICE),
             h::usd(4_800),
             h::supplier_wallet(),
             h::now_ms() + DAY_MS,
+            &clock,
             sc.ctx(),
         );
-        sc.return_to_sender(cap);
+        h::destroy_clock(clock);
+        ts::return_shared(company);
+        ts::return_shared(vault);
     };
 
     // A person signing off cannot lift a shipment condition. Approval raises

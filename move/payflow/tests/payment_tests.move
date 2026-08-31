@@ -14,7 +14,7 @@ module payflow::payment_tests;
 use std::string;
 use sui::test_scenario::{Self as ts, Scenario};
 use payflow::agent::AgentCap;
-use payflow::approval::{Self, ApproverCap, HumanApproval};
+use payflow::approval::{Self, HumanApproval};
 use payflow::invoice::Invoice;
 use payflow::limits;
 use payflow::mock_usdc::MOCK_USDC;
@@ -161,16 +161,22 @@ fun approver_cannot_exceed_their_own_limit() {
 
     scenario.next_tx(h::approver());
     {
-        let cap = scenario.take_from_sender<ApproverCap>();
-        approval::approve(
-            &cap,
+        let mut vault = scenario.take_shared<Treasury<MOCK_USDC>>();
+        let company = scenario.take_shared<payflow::identity::Company>();
+        let clock = h::new_clock(&mut scenario, h::now_ms());
+        approval::approve_scoped(
+            &mut vault,
+            &company,
             string::utf8(b"INV-ENORMOUS"),
             h::usd(500_000),
             h::supplier_wallet(),
             h::now_ms() + h::day_ms(),
+            &clock,
             scenario.ctx(),
         );
-        scenario.return_to_sender(cap);
+        h::destroy_clock(clock);
+        ts::return_shared(company);
+        ts::return_shared(vault);
     };
 
     scenario.end();
@@ -229,16 +235,29 @@ fun big_invoice(scenario: &mut Scenario): ID {
     )
 }
 
+/// Authorises the approver in TREASURY STATE.
+///
+/// Was `issue_approver_to`, which minted an `ApproverCap` carrying its own
+/// limit and could never be revoked. The authority now lives where the admin
+/// can withdraw it, so the fixture grants it the same way production will.
 fun issue_approver(scenario: &mut Scenario) {
+    // Membership is an upper-level requirement now: the company must recognise
+    // the approver before a treasury authorization means anything.
+    let company_id = h::setup_company(scenario);
     scenario.next_tx(h::admin());
-    let vault = scenario.take_shared<Treasury<MOCK_USDC>>();
+    let mut vault = scenario.take_shared<Treasury<MOCK_USDC>>();
     let cap = scenario.take_from_sender<TreasuryOwnerCap>();
-    approval::issue_approver_to(
-        &vault,
+    treasury::init_approvers(&mut vault, &cap);
+    treasury::authorize_approver(
+        &mut vault,
         &cap,
-        h::usd(250_000),
         h::approver(),
-        scenario.ctx(),
+        h::usd(250_000),
+        h::usd(1_000_000),
+        h::now_ms() + h::day_ms() * 30,
+        vector[],
+        company_id,
+        h::now_ms(),
     );
     ts::return_shared(vault);
     scenario.return_to_sender(cap);
@@ -251,16 +270,22 @@ fun approve(
     recipient: address,
 ) {
     scenario.next_tx(h::approver());
-    let cap = scenario.take_from_sender<ApproverCap>();
-    approval::approve(
-        &cap,
+    let mut vault = scenario.take_shared<Treasury<MOCK_USDC>>();
+    let company = scenario.take_shared<payflow::identity::Company>();
+    let clock = h::new_clock(scenario, h::now_ms());
+    approval::approve_scoped(
+        &mut vault,
+        &company,
         invoice_number,
         amount,
         recipient,
         h::now_ms() + h::day_ms(),
+        &clock,
         scenario.ctx(),
     );
-    scenario.return_to_sender(cap);
+    h::destroy_clock(clock);
+    ts::return_shared(company);
+    ts::return_shared(vault);
 }
 
 fun execute_approved(scenario: &mut Scenario, invoice_id: ID) {

@@ -91,7 +91,7 @@ describe("the seeded demo world produces the intended verdicts", () => {
     expect(amount).toBeLessThan(AGENT_CAPABILITY.dailyLimitCents);
   });
 
-  it("Scenario A — $30,000 is refused to the agent, allowed to an approver", () => {
+  it("Scenario A — $30,000 is refused to the agent AND to the approver", () => {
     const request = requestFor("s2_cashflow");
     expect(request.amountCents).toBe(3_000_000);
 
@@ -105,9 +105,16 @@ describe("the seeded demo world produces the intended verdicts", () => {
       "EXCEEDS_DAILY_LIMIT",
     ]);
 
-    // With a human approval, every check passes — the approval raises the
-    // ceiling and nothing else.
-    expect(violationsFor("s2_cashflow", "HUMAN_APPROVAL")).toEqual([]);
+    // AND the human approver cannot rescue it either. The approver ceiling is
+    // $25,000 — the live Chain-Doi authorization — so $30,000 fails the same
+    // check under human authority. Approval raises WHOSE limit applies; it
+    // does not remove the limit.
+    //
+    // This assertion used to be `toEqual([])`, which held only while
+    // APPROVER_AUTHORITY was a $250,000 constant no validator had ever seen.
+    expect(violationsFor("s2_cashflow", "HUMAN_APPROVAL")).toEqual([
+      "EXCEEDS_MAX_PAYMENT",
+    ]);
   });
 
   it("Scenario A is above the human-approval threshold, A0 below it", () => {

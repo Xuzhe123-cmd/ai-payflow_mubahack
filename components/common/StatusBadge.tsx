@@ -4,7 +4,8 @@
  * The single place an invoice's state becomes a word on screen.
  *
  * The state shown is what happened to the MONEY, not what the AI preferred: a
- * payment the model wanted but Sui refused reads "Blocked on chain", never
+ * payment the model wanted but the preflight refused reads "Would be blocked
+ * by Sui" — a prediction, since nothing was submitted — never
  * "Scheduled" — and an invoice that has already settled reads "Payment
  * released", never "Rejected", however firmly the guard refuses to pay it a
  * second time.

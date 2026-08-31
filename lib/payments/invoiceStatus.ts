@@ -169,7 +169,15 @@ export function describeOutcome(outcome: FinalOutcome): InvoiceStatusDescriptor 
       // reaches here — branch 1 of describeInvoiceStatus claims it first.
       return { label: "Payment rejected", tone: "negative", settled: false, category: "rejected" };
     case "SUI_REJECT":
-      return { label: "Blocked on chain", tone: "negative", settled: false, category: "rejected" };
+      // "Would be blocked", because nothing was submitted. SUI_REJECT is the
+      // verdict of the policy mirror and the preflight, not a transaction that
+      // reached a validator and failed.
+      return {
+        label: "Would be blocked by Sui",
+        tone: "negative",
+        settled: false,
+        category: "rejected",
+      };
   }
 }
 

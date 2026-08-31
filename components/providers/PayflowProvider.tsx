@@ -695,7 +695,7 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
             "CHAIN",
             approved
               ? `Human approved ${approval.paymentRequest.invoiceNumber}`
-              : `Approval refused on chain for ${approval.paymentRequest.invoiceNumber}`,
+              : `Approval would be refused by Sui for ${approval.paymentRequest.invoiceNumber} — nothing submitted`,
             approved
               ? "Re-checked under the approver's limits; every on-chain rule still passed."
               : approval.enforcement.violations.map((violation) => violation.detail).join(" "),
@@ -770,21 +770,47 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
         await wait(stage.durationMs * factor);
       }
 
-      const receipt = await submitPayment(request);
-      dispatch({
-        type: "RUN_PATCH",
-        invoiceId,
-        patch: { status: "PAID", receipt, executionStage: null },
-      });
-      log(
-        activityEvent(
-          "CHAIN",
-          `Payment executed · ${request.invoiceNumber}`,
-          `${receipt.digest.slice(0, 18)}… · sponsored transaction · epoch ${receipt.epoch}`,
+      // `submitPayment` REFUSES: on-chain execution is not wired up, and it
+      // will not invent a receipt. Marking the run PAID here is what reported a
+      // $30,000 settlement that never reached a validator, so the failure is
+      // recorded as a failure and the invoice stays unpaid.
+      try {
+        const receipt = await submitPayment(request);
+        dispatch({
+          type: "RUN_PATCH",
           invoiceId,
-          "positive",
-        ),
-      );
+          patch: { status: "PAID", receipt, executionStage: null },
+        });
+        log(
+          activityEvent(
+            "CHAIN",
+            `Payment executed · ${request.invoiceNumber}`,
+            `${receipt.digest.slice(0, 18)}… · epoch ${receipt.epoch}`,
+            invoiceId,
+            "positive",
+          ),
+        );
+      } catch (error) {
+        dispatch({
+          type: "RUN_PATCH",
+          invoiceId,
+          patch: {
+            status: "ANALYZED",
+            executionStage: null,
+            error: error instanceof Error ? error.message : "No payment was submitted.",
+          },
+        });
+        log(
+          activityEvent(
+            "CHAIN",
+            `No payment submitted · ${request.invoiceNumber}`,
+            "On-chain execution is not wired up in this build. Nothing was sent to Sui and the " +
+              "invoice remains unpaid.",
+            invoiceId,
+            "negative",
+          ),
+        );
+      }
     },
     [factor, log],
   );

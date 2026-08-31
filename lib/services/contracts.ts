@@ -106,4 +106,12 @@ export interface ApprovalResponse {
   approvedUnder: "HUMAN_APPROVAL";
   agentMaxSinglePaymentCents: number;
   approverMaxSinglePaymentCents: number;
+  /**
+   * Where that ceiling came from.
+   *
+   * CHAIN means the treasury's own approver record was read. FIXTURE means no
+   * on-chain authorization was found and an offline default stood in — which
+   * authorizes nothing, and a caller must not present it as though it did.
+   */
+  approverLimitSource?: "CHAIN" | "FIXTURE";
 }

@@ -16,6 +16,7 @@ use sui::coin::{Self, TreasuryCap};
 use sui::test_scenario::{Self as ts, Scenario};
 use payflow::agent::{Self, AgentCap};
 use payflow::invoice;
+use payflow::identity::{Self, Company, CompanyAdminCap};
 use payflow::mock_usdc::{Self, MOCK_USDC};
 use payflow::payment;
 use payflow::registry::{Self, SupplierRegistry};
@@ -175,4 +176,55 @@ public fun new_clock(scenario: &mut Scenario, ms: u64): Clock {
 
 public fun destroy_clock(c: Clock) {
     clock::destroy_for_testing(c);
+}
+
+/// Creates a Chain-Doi company and makes `approver()` an active Treasury
+/// Manager, returning the company id.
+///
+/// Membership is now an upper-level requirement for payment authority, so
+/// every approval fixture needs a company that recognises the approver. This
+/// is the one place that is arranged.
+public fun setup_company(scenario: &mut Scenario): ID {
+    scenario.next_tx(ADMIN);
+    identity::create_company_and_keep(
+        string::utf8(b"Chain-Doi"),
+        object::id_from_address(@0xDEAD),
+        scenario.ctx(),
+    );
+
+    scenario.next_tx(ADMIN);
+    let company_id = {
+        let mut company = scenario.take_shared<Company>();
+        let cap = scenario.take_from_sender<CompanyAdminCap>();
+        let clock = new_clock(scenario, NOW_MS);
+        identity::add_member(
+            &mut company,
+            &cap,
+            APPROVER,
+            identity::role_treasury_manager(),
+            identity::perm_view_invoices()
+                | identity::perm_view_treasury()
+                | identity::perm_approve_payments()
+                | identity::perm_authorize_agent(),
+            &clock,
+        );
+        let id = object::id(&company);
+        destroy_clock(clock);
+        scenario.return_to_sender(cap);
+        ts::return_shared(company);
+        id
+    };
+    company_id
+}
+
+/// Revokes the approver's membership. The higher-level block.
+public fun revoke_membership(scenario: &mut Scenario) {
+    scenario.next_tx(ADMIN);
+    let mut company = scenario.take_shared<Company>();
+    let cap = scenario.take_from_sender<CompanyAdminCap>();
+    let clock = new_clock(scenario, NOW_MS);
+    identity::revoke_member(&mut company, &cap, APPROVER, &clock);
+    destroy_clock(clock);
+    scenario.return_to_sender(cap);
+    ts::return_shared(company);
 }

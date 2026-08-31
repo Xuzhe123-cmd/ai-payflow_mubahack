@@ -24,6 +24,8 @@ import {
   type PaymentActionState,
 } from "@/lib/payments/availableAction";
 import type { InvoiceEntry } from "@/components/hooks/usePayflowSelectors";
+import type { ApprovalResponse } from "@/lib/services/contracts";
+import { approvalAbortFor, formatAbort } from "@/lib/sui/moveAborts";
 import type { TreasuryAction } from "@/lib/types";
 
 const ACTION_MARK: Record<TreasuryAction, string> = {
@@ -200,6 +202,72 @@ function RecommendationBlock({ entry }: { entry: InvoiceEntry }) {
   );
 }
 
+/**
+ * The approval preflight, refused.
+ *
+ * WOULD, NOT DID — the distinction the whole card is built around. A preflight
+ * asks Sui to evaluate `approval::approve_scoped` without executing it: the
+ * validator runs the real Move function against real treasury state and reports
+ * the abort it would raise. Nothing is signed, nothing is submitted, no gas is
+ * spent, and no funds move.
+ *
+ * That makes this stronger than a frontend limit check, and the card has to say
+ * which it is. "$30,000 is over $25,000" is arithmetic any page could do; a
+ * named abort from a named Move function is the chain's own answer, and the
+ * constant is printed so a reader can go and find it in the source.
+ */
+function PreflightRefusal({ approval }: { approval: ApprovalResponse }) {
+  const failed = approval.enforcement.checks.find((check) => !check.passed);
+  const abort = failed ? approvalAbortFor(failed.code) : null;
+
+  return (
+    <div className="rounded-xl border border-neg/35 bg-neg-soft p-4">
+      <Eyebrow className="text-neg">Sui preflight</Eyebrow>
+
+      <div className="mt-2.5 text-[15px] font-semibold tracking-[-0.01em] text-neg">
+        Sui would reject this approval
+      </div>
+      <p className="mt-1 text-[11.5px] text-neg/85">
+        Preflight check · no transaction submitted
+      </p>
+
+      {failed?.limit && failed.actual ? (
+        <dl className="mt-3.5 space-y-2 border-t border-neg/20 pt-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-[12px] text-neg/85">Authorization limit</dt>
+            <dd className="tabular text-[13.5px] font-semibold text-neg">{failed.limit}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-[12px] text-neg/85">Requested</dt>
+            <dd className="tabular text-[13.5px] font-semibold text-neg">{failed.actual}</dd>
+          </div>
+        </dl>
+      ) : null}
+
+      {/* The Move constant, not a paraphrase of it. Omitted entirely when the
+          failed check is not one this path enforces, rather than guessed at. */}
+      {abort ? (
+        <div className="mt-3.5 border-t border-neg/20 pt-3">
+          <div className="font-mono text-[12.5px] font-semibold text-neg">
+            {formatAbort(abort)}
+          </div>
+          <div className="mt-0.5 font-mono text-[10.5px] text-neg/75">{abort.location}</div>
+        </div>
+      ) : null}
+
+      <p className="mt-3.5 border-t border-neg/20 pt-3 text-[12.5px] font-medium leading-relaxed text-neg">
+        The real Move authorization rule rejects this amount. No transaction was submitted. No
+        funds moved.
+      </p>
+      <p className="mt-2 text-[12px] leading-relaxed text-neg/85">
+        This is the on-chain rule speaking, not a limit enforced in this interface — Sui evaluated{" "}
+        <span className="font-mono text-[11px]">approval::approve_scoped</span> against live
+        treasury state and reported the abort it would raise.
+      </p>
+    </div>
+  );
+}
+
 function SafetyBlock({ entry }: { entry: InvoiceEntry }) {
   const analysis = entry.run!.analysis!;
   const { enforcement, paymentRequest } = analysis;
@@ -223,13 +291,21 @@ function SafetyBlock({ entry }: { entry: InvoiceEntry }) {
     return <ChainStateBlock condition={condition} settled={settled} chainInvoice={chainInvoice} />;
   }
 
+  // A preflight of the APPROVAL has already been run and refused. That verdict
+  // is the useful thing to show here — far more so than "no payment request was
+  // created", which was true, unexplanatory, and left a reader with no idea
+  // which rule had spoken or what it said.
+  const approvalPreflight = entry.run?.approval ?? null;
+  if (approvalPreflight?.enforcement.outcome === "SUI_REJECT") {
+    return <PreflightRefusal approval={approvalPreflight} />;
+  }
+
   if (!paymentRequest || !enforcement) {
     return (
       <div className="rounded-xl border border-hairline bg-surface-sunken p-4">
-        <Eyebrow>Sui safety check</Eyebrow>
+        <Eyebrow>Sui preflight</Eyebrow>
         <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
-          No payment request was created, so nothing was submitted to the
-          treasury contract.
+          Nothing has been submitted to the treasury contract for this invoice.
         </p>
         <p className="mt-2.5 text-[12px] leading-relaxed text-ink-faint">
           The chain is never asked to authorise a payment the agent did not propose. An escalated
@@ -248,7 +324,7 @@ function SafetyBlock({ entry }: { entry: InvoiceEntry }) {
         <Eyebrow className="text-chain">
           <span className="flex items-center gap-1.5">
             <HugeiconsIcon icon={Shield01Icon} size={11} strokeWidth={2} />
-            Sui safety check
+            Sui preflight
           </span>
         </Eyebrow>
         <Badge tone="chain">{enforcement.checks.length} assertions</Badge>
@@ -427,17 +503,27 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
     return (
       <div className="flex flex-col rounded-xl border border-neg/35 bg-neg-soft p-4">
         <Eyebrow className="text-neg">Outcome</Eyebrow>
+        {/* WOULD BE, not WAS. Nothing was submitted, so nothing on chain has
+            rejected anything — the verdict comes from the policy mirror and the
+            Sui preflight. "REJECTED" beside a $30,000 figure read as a payment
+            that failed, rather than one that was never attempted. */}
         <div className="mt-2.5 flex items-baseline gap-2">
           <span className="text-[17px] leading-none text-neg">✕</span>
           <span className="text-[21px] font-semibold tracking-[-0.015em] text-neg">
-            REJECTED
+            WOULD BE REFUSED BY SUI
           </span>
         </div>
+        <p className="mt-1 text-[11.5px] text-neg/85">
+          Preflight verdict · no transaction submitted
+        </p>
 
         {primary?.limit && primary.actual ? (
           <dl className="mt-3.5 space-y-2 border-t border-neg/20 pt-3">
             <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-[12px] text-neg/85">On-chain limit</dt>
+              {/* The ceiling is read from the treasury's approver record, so it
+                  is named as an authorization rather than as "on-chain limit",
+                  which suggested something had already been enforced. */}
+              <dt className="text-[12px] text-neg/85">Authorization limit</dt>
               <dd className="tabular text-[13.5px] font-semibold text-neg">
                 {primary.limit}
               </dd>
@@ -451,10 +537,31 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
           </dl>
         ) : null}
 
+        {/* The whole story, in the order it happened — and the second bullet is
+            the one that matters: no approval was ever submitted, so nothing was
+            signed, no HumanApproval object exists, and nothing was refused. The
+            verdict is a prediction about what Sui WOULD do. */}
+        <ul className="mt-3.5 space-y-1 border-t border-neg/20 pt-3 text-[12px] leading-relaxed text-neg/90">
+          <li>· The AI recommended this payment.</li>
+          <li>· No human approval transaction was submitted.</li>
+          <li>
+            · The approver&rsquo;s Chain-Doi authorization caps a single payment
+            {primary?.limit ? ` at ${primary.limit}` : " below this amount"}.
+          </li>
+          <li>
+            · A Sui preflight of{" "}
+            <span className="font-mono text-[11px]">approval::approve_scoped</span> would abort
+            with <span className="font-mono text-[11px]">601 EAboveApproverLimit</span>.
+          </li>
+        </ul>
+
         <p className="mt-3.5 border-t border-neg/20 pt-3 text-[12.5px] font-medium leading-relaxed text-neg">
-          An AI recommendation cannot override on-chain treasury policy.
+          An AI recommendation cannot override treasury policy, and neither can a human
+          approval — it raises whose limit applies, never the limit itself.
         </p>
-        <p className="mt-2 text-[12px] text-neg/85">No payment action available.</p>
+        <p className="mt-2 text-[12px] text-neg/85">
+          No transaction was submitted. No funds moved. No payment action available.
+        </p>
       </div>
     );
   }
@@ -608,10 +715,29 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
       </div>
       )}
 
+      {/* A digest is shown ONLY for a network that actually settled one.
+          The demo adapter returns network "demo", and rendering its digest in
+          the same monospace as a real one is how a fabricated settlement came
+          to look genuine. */}
       {run.receipt ? (
-        <p className="mt-2.5 truncate font-mono text-[10.5px] text-ink-faint">
-          {run.receipt.digest}
-        </p>
+        run.receipt.network === "demo" ? (
+          <div className="mt-2.5 rounded-lg border border-warn/30 bg-warn-soft px-2.5 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-warn">
+              Simulated — not submitted to Sui
+            </div>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
+              No transaction was sent and no funds moved. This identifier is generated locally and
+              is not a Sui transaction digest.
+            </p>
+            <p className="mt-1 truncate font-mono text-[10.5px] text-ink-faint">
+              {run.receipt.digest}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-2.5 truncate font-mono text-[10.5px] text-ink-faint">
+            {run.receipt.digest}
+          </p>
+        )
       ) : null}
 
       <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-faint">

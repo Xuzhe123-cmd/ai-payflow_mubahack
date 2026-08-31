@@ -24,6 +24,13 @@ import {
 } from "@/lib/identity/authorization";
 import { identityFromSession } from "@/lib/services/authService";
 import { usePayflow } from "@/components/providers/PayflowProvider";
+import { hasPermission } from "@/lib/identity/permissions";
+import {
+  MEMBERSHIP_SYNC_MAX_AGE_MS,
+  resolvePaymentAuthority,
+  type ApproverAuthorization,
+  type PaymentAuthorityState,
+} from "@/lib/identity/paymentAuthority";
 
 interface IdentityResponse {
   ok?: boolean;
@@ -43,11 +50,21 @@ interface IdentityResponse {
     active: boolean;
     grantedAtMs: number;
   };
+  /** The treasury's own approver record. Null when it holds none. */
+  authorization?: ApproverAuthorization | null;
 }
 
 export interface AuthorizationResult {
   /** Null until the chain has answered. Nothing should render before. */
   state: AuthorizationState | null;
+  /**
+   * Whether Move would accept a payment approval from this address.
+   *
+   * A SEPARATE question from `state`, deliberately. Membership, role and a
+   * declared permission are company facts; this is the treasury's own record,
+   * and it is the only one `approval::approve_scoped` reads.
+   */
+  paymentAuthority: PaymentAuthorityState | null;
   /**
    * True when no company object exists yet.
    *
@@ -55,6 +72,8 @@ export interface AuthorizationResult {
    * not been created rather than implying this person was refused.
    */
   companyNotDeployed: boolean;
+  /** When the chain answered, or null before it has. */
+  readAtMs: number | null;
   refresh: () => void;
 }
 
@@ -78,9 +97,20 @@ export function useAuthorization(identity: AuthenticatedIdentity | null): Author
   // Stored WITH the address it describes. A result for a previous identity is
   // not a result for this one, and keying it here means a change of identity
   // reads as "not answered yet" without an effect having to reset anything.
-  const [answer, setAnswer] = useState<{ address: string; state: AuthorizationState } | null>(
-    null,
-  );
+  const [answer, setAnswer] = useState<{
+    address: string;
+    state: AuthorizationState;
+    authorization: ApproverAuthorization | null;
+    /**
+     * When the chain answered.
+     *
+     * Captured in the fetch callback rather than read during render: `Date.now()`
+     * in a render body makes the render impure, and it is also the wrong clock —
+     * expiry should be judged against the moment the authorization was read, not
+     * against whenever React happened to re-render.
+     */
+    readAtMs: number;
+  } | null>(null);
   const [notDeployed, setNotDeployed] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
@@ -110,20 +140,32 @@ export function useAuthorization(identity: AuthenticatedIdentity | null): Author
               identity,
               chainError: payload.message ?? "The chain could not be read.",
             }),
+            authorization: null,
+            readAtMs: Date.now(),
           });
           return;
         }
 
         if (payload.status === "NOT_DEPLOYED") {
           setNotDeployed(true);
-          setAnswer({ address, state: resolveAuthorization({ identity, membership: null }) });
+          setAnswer({
+            address,
+            state: resolveAuthorization({ identity, membership: null }),
+            authorization: null,
+            readAtMs: Date.now(),
+          });
           return;
         }
 
         setNotDeployed(false);
 
         if (payload.status === "NO_MEMBERSHIP" || !payload.membership || !payload.company) {
-          setAnswer({ address, state: resolveAuthorization({ identity, membership: null }) });
+          setAnswer({
+            address,
+            state: resolveAuthorization({ identity, membership: null }),
+            authorization: payload.authorization ?? null,
+            readAtMs: Date.now(),
+          });
           return;
         }
 
@@ -138,7 +180,12 @@ export function useAuthorization(identity: AuthenticatedIdentity | null): Author
           grantedAtMs: payload.membership.grantedAtMs,
         });
 
-        setAnswer({ address, state: resolveAuthorization({ identity, membership }) });
+        setAnswer({
+          address,
+          state: resolveAuthorization({ identity, membership }),
+          authorization: payload.authorization ?? null,
+          readAtMs: Date.now(),
+        });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -150,6 +197,8 @@ export function useAuthorization(identity: AuthenticatedIdentity | null): Author
             chainError:
               error instanceof Error ? error.message : "The chain could not be reached.",
           }),
+          authorization: null,
+          readAtMs: Date.now(),
         });
       });
 
@@ -166,8 +215,34 @@ export function useAuthorization(identity: AuthenticatedIdentity | null): Author
       ? answer.state
       : null;
 
+  // The payment-authority question, derived from the SAME chain read. One
+  // fetch, two answers — a second lookup could disagree with the first.
+  const paymentAuthority: PaymentAuthorityState | null =
+    state === null
+      ? null
+      : resolvePaymentAuthority({
+          authenticated: state.kind !== "UNAUTHENTICATED",
+          companyExists: !notDeployed,
+          isMember: state.kind === "AUTHORIZED" || state.kind === "REVOKED",
+          membershipActive: state.kind === "AUTHORIZED",
+          role: state.kind === "AUTHORIZED" ? state.membership.role : null,
+          declaresApprovePayments:
+            state.kind === "AUTHORIZED" &&
+            hasPermission(state.membership.permissionMask, "APPROVE_PAYMENTS"),
+          authorization: answer?.authorization ?? null,
+          // The clock the chain was read at, so expiry is judged
+          // against that moment rather than against this render.
+          nowMs: answer?.readAtMs ?? 0,
+          membershipSyncMaxAgeMs: MEMBERSHIP_SYNC_MAX_AGE_MS,
+          chainError: state.kind === "CHAIN_UNAVAILABLE" ? state.reason : null,
+        });
+
   return {
     state,
+    paymentAuthority,
+    // Shared so a screen previewing one payment uses the same instant the
+    // authority was resolved at.
+    readAtMs: answer?.readAtMs ?? null,
     companyNotDeployed: identity ? notDeployed : false,
     refresh: () => setAttempt((value) => value + 1),
   };

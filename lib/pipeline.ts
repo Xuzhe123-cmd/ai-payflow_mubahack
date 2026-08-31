@@ -160,7 +160,7 @@ export async function runPipeline(
       "policy_enforce",
       "Sui policy enforcement",
       enforcement.outcome !== "APPROVED"
-        ? `REJECTED on chain — ${enforcement.violations.map((v) => v.code).join(", ")}.`
+        ? `WOULD BE REFUSED BY SUI — ${enforcement.violations.map((v) => v.code).join(", ")}. No transaction submitted.`
         : authority === "HUMAN_APPROVAL"
           ? `Checks pass, but ${amount} is above the ${formatMoneyRounded(input.world.policy.humanApprovalThresholdCents, paymentRequest.currency)} threshold — a human approval is required before execution.`
           : `Approved — payment of ${amount} on ${paymentRequest.requestedDate}.`,

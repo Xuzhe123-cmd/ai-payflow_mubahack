@@ -43,7 +43,7 @@ export default function SecurityPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Blocked on chain"
+          label="Would be blocked by Sui"
           value={String(blocked.length)}
           context="Move aborted the transaction"
           accent={blocked.length > 0 ? "neg" : null}

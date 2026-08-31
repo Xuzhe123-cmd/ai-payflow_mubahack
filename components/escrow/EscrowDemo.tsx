@@ -109,9 +109,16 @@ export function EscrowDemo({
       // flow must stay exactly where it was rather than pretend otherwise.
       if (payload.ok === false) {
         const refusal = payload.guard?.refusal ?? payload.error ?? "The step was refused.";
+        // "on chain" only where a transaction actually reached the network.
+        // In simulated mode nothing is submitted, so the same abort code has to
+        // be described as a preflight verdict rather than a rejection.
+        const submitted = (payload.mode ?? "simulated") !== "simulated";
         setError(
           payload.abortCode
-            ? `Refused on chain with abort code ${payload.abortCode}. ${refusal}`
+            ? submitted
+              ? `Rejected by Sui with abort code ${payload.abortCode}. ${refusal}`
+              : `Would be refused by Sui with abort code ${payload.abortCode}. ` +
+                `No transaction was submitted and no funds moved. ${refusal}`
             : refusal,
         );
         return;

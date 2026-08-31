@@ -21,11 +21,13 @@
 import { NextResponse } from "next/server";
 
 import { createSuiQueries } from "@/lib/sui/client";
+import { unitsToCents } from "@/lib/sui/units";
 import { MissingDeploymentError, configuredNetwork, loadManifest } from "@/lib/sui/manifest";
 import {
   extractFields,
   readBool,
   readString,
+  readStringArray,
   readTableId,
   readU64,
 } from "@/lib/sui/decode";
@@ -104,8 +106,17 @@ export async function GET(request: Request) {
       memberCount: Number(readU64(fields, "member_count") ?? 0),
     };
 
+    // Read regardless of membership: the two are separate facts, and an
+    // authorization without a membership is exactly the kind of inconsistency
+    // an operator would want to see rather than have hidden.
+    const authorization = await readApproverAuthorization(
+      queries,
+      company.treasuryId,
+      address,
+    );
+
     if (!entry) {
-      return NextResponse.json({ ok: true, status: "NO_MEMBERSHIP", company });
+      return NextResponse.json({ ok: true, status: "NO_MEMBERSHIP", company, authorization });
     }
 
     const value = extractFields(entry.value);
@@ -113,6 +124,7 @@ export async function GET(request: Request) {
       ok: true,
       status: "OK",
       company,
+      authorization,
       membership: {
         memberAddress: address,
         roleCode: Number(readU64(value, "role") ?? 0),
@@ -126,6 +138,56 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "The chain could not be read.";
     return NextResponse.json({ ok: false, code: "CHAIN_UNAVAILABLE", message }, { status: 503 });
   }
+}
+
+/**
+ * The treasury's approver record for one address, if it holds one.
+ *
+ * Read from the dynamic field the authorization lives in, keyed by the
+ * approver's address. Returns null for "no record" and throws for "could not
+ * read" — the two must not collapse, because one means unauthorized and the
+ * other means unknown.
+ */
+async function readApproverAuthorization(
+  queries: ReturnType<typeof createSuiQueries>,
+  treasuryId: string,
+  address: string,
+): Promise<{
+  approver: string;
+  treasuryId: string;
+  maxSingleCents: number;
+  dailyLimitCents: number;
+  authorizedTodayCents: number;
+  enabled: boolean;
+  expiresAtMs: number;
+  allowedRecipients: string[];
+  companyId: string;
+  membershipActive: boolean;
+  membershipSyncedAtMs: number;
+} | null> {
+  const entries = await queries.getDynamicFields(treasuryId);
+  const entry = entries.find((row) => sameAddress(String(row.name ?? ""), address));
+  if (!entry) return null;
+
+  const value = extractFields(entry.value);
+  // A field under this key that does not decode as an authorization is not an
+  // authorization. Reported as absent rather than guessed at.
+  if (readU64(value, "max_single") === null) return null;
+
+  return {
+    approver: address,
+    treasuryId,
+    maxSingleCents: unitsToCents(readU64(value, "max_single") ?? BigInt(0)),
+    dailyLimitCents: unitsToCents(readU64(value, "daily_limit") ?? BigInt(0)),
+    authorizedTodayCents: unitsToCents(readU64(value, "authorized_today") ?? BigInt(0)),
+    enabled: readBool(value, "enabled") ?? false,
+    expiresAtMs: Number(readU64(value, "expires_at_ms") ?? BigInt(0)),
+    allowedRecipients: readStringArray(value, "allowed_recipients"),
+    companyId: readString(value, "company_id") ?? "",
+    // Defaults to false. An unreadable mirror must never read as active.
+    membershipActive: readBool(value, "membership_active") ?? false,
+    membershipSyncedAtMs: Number(readU64(value, "membership_synced_at_ms") ?? BigInt(0)),
+  };
 }
 
 function sameAddress(a: string, b: string): boolean {

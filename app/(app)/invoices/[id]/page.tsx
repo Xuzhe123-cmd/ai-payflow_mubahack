@@ -17,6 +17,7 @@ import { CashFlowAnalysis } from "@/components/invoices/CashFlowAnalysis";
 import { DecisionChain } from "@/components/payments/DecisionChain";
 import { ShipmentEvidence } from "@/components/payments/ShipmentEvidence";
 import { PurchaseOrderEvidence } from "@/components/invoices/PurchaseOrderEvidence";
+import { ApprovalAuthority } from "@/components/payments/ApprovalAuthority";
 import { OracleCard } from "@/components/dashboard/OracleCard";
 import { PipelineStrip } from "@/components/dashboard/PipelineStrip";
 import { buildInvoiceOracleFeed } from "@/lib/oracle/feed";
@@ -115,6 +116,20 @@ export default function InvoiceAnalysisPage({
               by the invoice's own PO reference, never by an invoice number. */}
           <PurchaseOrderEvidence facts={analysis.analysis} />
 
+          {/* Shown only where a person is actually being asked to authorize.
+              Reads the SAME chain-derived authority as the access page — the
+              logic is not repeated here. */}
+          {analysis.finalOutcome === "AWAITING_APPROVAL" ||
+          analysis.finalOutcome === "HUMAN_REVIEW" ? (
+            <ApprovalAuthority
+              invoiceNumber={analysis.analysis.invoiceFacts.invoiceNumber}
+              amountCents={analysis.analysis.invoiceFacts.amountCents}
+              supplierName={analysis.analysis.invoiceFacts.supplierName}
+              recipient={analysis.analysis.invoiceFacts.recipientWallet}
+              treasuryId={TREASURY_ID}
+            />
+          ) : null}
+
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-5">
               <CashFlowAnalysis analysis={analysis} />
@@ -148,6 +163,10 @@ export default function InvoiceAnalysisPage({
     </PageContainer>
   );
 }
+
+/** The treasury every authorization on this page is measured against. */
+const TREASURY_ID =
+  "0x15f45303f80c591ea9777da30386c650df73a9277e478f43e128af123a57dd5a";
 
 const EMPTY = {
   approval: null,

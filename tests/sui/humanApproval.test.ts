@@ -40,7 +40,12 @@ function request(overrides: Partial<PaymentRequest> = {}): PaymentRequest {
     invoiceNumber: "INV-HUMAN-1",
     supplierId: APPROVED.id,
     supplierName: APPROVED.name,
-    amountCents: 3_000_000,
+    // $24,000: above the agent's $5,000 single cap and $20,000 daily limit,
+    // and inside the approver's $25,000 authorization. Chosen so the property
+    // under test — approval lifts the AGENT's ceiling — is demonstrated by an
+    // amount the approver can actually authorize. It used to be $30,000, which
+    // only worked while the approver figure was a $250,000 constant.
+    amountCents: 2_400_000,
     currency: "USD",
     recipientWallet: APPROVED.registeredWallet,
     requestedDate: "2026-09-05",

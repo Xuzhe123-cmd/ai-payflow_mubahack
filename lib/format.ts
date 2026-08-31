@@ -86,7 +86,7 @@ export const OUTCOME_LABEL: Record<FinalOutcome, string> = {
   AWAITING_APPROVAL: "Awaiting approval",
   HUMAN_REVIEW: "Human approval",
   REJECTED: "Rejected",
-  SUI_REJECT: "Blocked on chain",
+  SUI_REJECT: "Would be blocked by Sui",
 };
 
 export const LEVEL_INDEX: Record<Level, number> = {

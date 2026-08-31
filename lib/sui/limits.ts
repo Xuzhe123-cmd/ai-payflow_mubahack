@@ -75,8 +75,18 @@ export function limitsFor(
     return {
       authority,
       holder: "the approver",
-      // A human approval is only ever created by someone holding an approver
-      // capability, so reaching this branch already proves both.
+      // NOT a statement about on-chain authority, and it used to read as one.
+      //
+      // The old comment here said reaching this branch "already proves" the
+      // caller holds an approver capability. That stopped being true when
+      // `ApproverCap` was replaced by treasury-state authorization: these
+      // figures come from a WorldSnapshot, which may be a demo fixture, and
+      // nothing about constructing them consults the chain.
+      //
+      // Move decides. `treasury::approver_can_authorize` reads the live
+      // authorization, and `approval::limits_for` re-checks it at execution.
+      // These fields drive the off-chain forecast and the explanation shown
+      // beside it — never a permission.
       authorized: true,
       enabled: true,
       maxSinglePaymentCents: approver.maxSinglePaymentCents,

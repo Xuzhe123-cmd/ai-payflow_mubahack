@@ -47,6 +47,28 @@ const ALLOWED_WITHOUT_CAP = new Map<string, string>([
     "Funding a treasury is deliberately open — adding money harms no one, and " +
       "requiring the admin to sign every top-up would break sponsored funding.",
   ],
+  [
+    "approval::approve_scoped",
+    "The approver exercising DELEGATED authority, not administering anything. " +
+      "It mints no authority: `treasury::authorize_approver` grants it and DOES " +
+      "demand the owner capability, and this function aborts unless the treasury " +
+      "already records a live authorization for `ctx.sender()`. What it mutates " +
+      "is that approver's own daily counter — requiring an admin signature here " +
+      "would mean the admin co-signing every approval, which is precisely the " +
+      "delegation the authorization exists to avoid.",
+  ],
+  [
+    "approval::sync_membership",
+    "Copies the live Company's verdict on one member into the treasury's " +
+      "mirror, and can do nothing else. It asserts no status of its own: it " +
+      "reads `identity::is_active_member` and `has_permission` from the Company " +
+      "passed in, and `treasury::assert_approver_company` refuses a Company the " +
+      "authorization is not bound to. A hostile caller can therefore only make " +
+      "the treasury agree with the company — the worst they achieve is telling " +
+      "the truth. It must stay permissionless because the mirror has to be " +
+      "refreshable by anyone: gating it behind the owner cap would mean a " +
+      "revoked membership stayed usable until the admin personally noticed.",
+  ],
 ]);
 
 interface MoveFunction {

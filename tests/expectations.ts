@@ -38,11 +38,17 @@ export const EXPECTATIONS: ScenarioExpectation[] = [
   },
   {
     scenarioId: "s2_cashflow",
-    // Every on-chain check passes; $30,000 is simply above what the agent may
-    // settle alone, so policy inserts a person. The AI still chose SCHEDULE.
+    // $30,000 is above what the agent may settle alone AND above what the
+    // human approver is authorized for. The approver ceiling is $25,000 — the
+    // live Chain-Doi authorization — so inserting a person does not rescue it.
+    //
+    // This changed when APPROVER_AUTHORITY stopped being a $250,000 constant
+    // and started reflecting the real limit. The scenario is now a
+    // demonstration that a request can exceed even human authority, which is
+    // the truth about this invoice rather than a weakening of the demo.
     allowedActions: ["SCHEDULE"],
-    finalOutcomes: ["AWAITING_APPROVAL"],
-    why: "Legitimate, but paying today troughs below the reserve, and $30,000 needs a human approver.",
+    finalOutcomes: ["SUI_REJECT"],
+    why: "Legitimate, but $30,000 exceeds both the agent's $5,000 cap and the approver's $25,000 authorization.",
   },
   {
     scenarioId: "s3_discount",

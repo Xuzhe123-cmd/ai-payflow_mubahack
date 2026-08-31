@@ -22,8 +22,17 @@ import {
 } from "../../lib/sui/deployment";
 
 const ORIGINAL = "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d";
-/** The real v2 package, published by the escrow upgrade. */
-const UPGRADED = "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578";
+/**
+ * The CURRENT live package.
+ *
+ * v3, published by the identity/authorization upgrade. Pinned deliberately:
+ * these tests exist to catch the manifest changing without anyone noticing,
+ * so the value is updated when a real upgrade happens and never read from the
+ * manifest it is meant to be checking.
+ */
+const UPGRADED = "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690";
+/** The package v3 replaced, kept so the history stays followable. */
+const PREVIOUS = "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578";
 
 const live = JSON.parse(
   readFileSync(resolve(process.cwd(), "deployments/testnet.json"), "utf8"),
@@ -65,11 +74,13 @@ describe("the deployed manifest is intact", () => {
     );
   });
 
-  it("records the escrow upgrade to v2", () => {
+  it("records the identity upgrade to v3", () => {
     expect(live.upgrade?.packageId).toBe(UPGRADED);
-    expect(live.upgrade?.previousPackageId).toBe(ORIGINAL);
-    expect(live.upgrade?.version).toBe(2);
-    expect(live.upgrade?.addedModules).toEqual(["escrow", "oracle"]);
+    // v3 replaced v2, not the original — the manifest records the LATEST
+    // upgrade, and reading it as v1 would lose a version of the history.
+    expect(live.upgrade?.previousPackageId).toBe(PREVIOUS);
+    expect(live.upgrade?.version).toBe(3);
+    expect(live.upgrade?.addedModules).toEqual(["identity"]);
   });
 
   it("records the seeded escrow demo objects", () => {
@@ -95,8 +106,10 @@ describe("the deployed manifest is intact", () => {
   it("knows which package defined the upgraded modules", () => {
     // Without this, the seed looks for the wrong OracleCap type — which is
     // exactly how the partial run failed.
-    expect(live.moduleOrigins?.oracle).toBe(UPGRADED);
-    expect(live.moduleOrigins?.escrow).toBe(UPGRADED);
+    // v2, not v3: a type stays anchored to the version that introduced its
+    // module, and the identity upgrade did not move escrow or oracle.
+    expect(live.moduleOrigins?.oracle).toBe(PREVIOUS);
+    expect(live.moduleOrigins?.escrow).toBe(PREVIOUS);
   });
 
   it("records the real A0 settlement as evidence", () => {
@@ -160,8 +173,8 @@ describe("after an upgrade the two package ids mean different things", () => {
 
   it("records what the upgrade replaced, so the history is followable", () => {
     const manifest = upgraded();
-    expect(manifest.upgrade?.previousPackageId).toBe(ORIGINAL);
-    expect(manifest.upgrade?.version).toBe(2);
-    expect(manifest.upgrade?.addedModules).toEqual(["escrow", "oracle"]);
+    expect(manifest.upgrade?.previousPackageId).toBe(PREVIOUS);
+    expect(manifest.upgrade?.version).toBe(3);
+    expect(manifest.upgrade?.addedModules).toEqual(["identity"]);
   });
 });

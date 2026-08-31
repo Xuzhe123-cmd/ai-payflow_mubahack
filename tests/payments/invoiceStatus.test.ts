@@ -171,14 +171,17 @@ describe("an unsettled invoice", () => {
     expect(status.settled).toBe(false);
   });
 
-  it("reads Blocked on chain when Sui refused the payment", () => {
+  it("reads Would be blocked by Sui when the preflight refused the payment", () => {
     const status = describeInvoiceStatus({
       runStatus: "ANALYZED",
       finalOutcome: "SUI_REJECT",
       chainInvoiceStatus: "PENDING",
     });
 
-    expect(status.label).toBe("Blocked on chain");
+    // Not "Blocked on chain": SUI_REJECT is the verdict of the policy mirror
+    // and the preflight. No transaction was submitted, so nothing on chain
+    // blocked anything.
+    expect(status.label).toBe("Would be blocked by Sui");
   });
 });
 

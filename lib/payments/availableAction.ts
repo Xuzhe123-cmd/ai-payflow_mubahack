@@ -281,7 +281,7 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
         lead: "Policy checks passed",
         status: "Authorized · ready to execute",
         detail:
-          `${amount} is within the agent's authority and all Sui safety checks passed. ` +
+          `${amount} is within the agent's authority and every Sui preflight check passed. ` +
           "No payment has been submitted yet.",
         facts: ["Ready to execute"],
         tone: "chain",
@@ -305,19 +305,31 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
         };
       }
 
-      // A person approved, and the chain still refused. Approval raises WHO may
-      // authorize the amount; it does not switch off treasury policy.
+      // The preflight refused, BEFORE any approval was minted. Nothing was
+      // signed and nothing was sent, so there is no approval to describe as
+      // having been refused — only one that would be.
       if (input.humanApproval?.outcome === "SUI_REJECT") {
+        // WOULD BE, not WAS. This verdict comes from the policy mirror and the
+        // Sui preflight — no transaction was submitted, so nothing on chain
+        // rejected anything. Saying "refused on chain" claimed an event that
+        // never happened, and next to a $30,000 figure it read as a failed
+        // payment rather than as a payment that was never attempted.
         return {
           action: "NONE",
           label: null,
-          headline: "APPROVAL REFUSED ON CHAIN",
-          lead: null,
-          status: "Approval refused on chain",
+          headline: "WOULD BE REFUSED BY SUI",
+          lead: "Preflight — nothing was submitted",
+          status: "Would be refused by Sui",
           detail:
-            "A person approved this, and Sui still refused it. Approval raises the authority " +
-            "limit, not the rules.",
-          facts: ["No payment action available"],
+            "No human approval transaction was submitted. Sui would refuse one: this amount is " +
+            "above the approver's own Chain-Doi authorization. An approval raises WHOSE limit " +
+            "applies, never the limit itself.",
+          facts: [
+            "No transaction was submitted",
+            "No funds moved",
+            "Human approval does not bypass treasury policy",
+            "No payment action available",
+          ],
           tone: "negative",
           fundsLocked: false,
           settled: false,

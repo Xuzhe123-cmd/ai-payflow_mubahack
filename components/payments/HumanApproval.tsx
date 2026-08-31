@@ -110,7 +110,7 @@ export function HumanApproval({
         )}
       >
         <Eyebrow className={approved ? "text-warn" : "text-neg"}>
-          {approved ? "Approved by operator" : "Refused on chain"}
+          {approved ? "Approved by operator" : "Would be refused by Sui"}
         </Eyebrow>
         <div
           className={cn(
@@ -121,10 +121,17 @@ export function HumanApproval({
           {approved ? "Cleared for execution" : "Approval refused"}
         </div>
 
+        {/* NOBODY APPROVED ANYTHING HERE. This branch is reached when the
+            preflight refuses, which happens BEFORE any approval is minted — no
+            HumanApproval object exists, no wallet signed, no transaction was
+            sent. "A human approved this, and the chain still refused it"
+            described two events, neither of which occurred. */}
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
           {approved
-            ? `Re-checked under the approver's ${formatMoneyRounded(approval!.approverMaxSinglePaymentCents)} limit rather than the agent's ${formatMoneyRounded(approval!.agentMaxSinglePaymentCents)}. All ten on-chain rules still passed.`
-            : "A human approved this, and the chain still refused it. Approval raises who may authorize the amount — it does not switch off treasury policy."}
+            ? `Re-checked under the approver's ${formatMoneyRounded(approval!.approverMaxSinglePaymentCents)} limit rather than the agent's ${formatMoneyRounded(approval!.agentMaxSinglePaymentCents)}. Every rule still passed.`
+            : "Preflight verdict · no transaction submitted. No human approval transaction was " +
+              "submitted, so no approval exists to be refused — Sui would refuse one if it were. " +
+              "An approval raises whose limit applies, never the limit itself."}
         </p>
 
         {!approved ? (

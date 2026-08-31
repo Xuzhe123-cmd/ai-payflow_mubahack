@@ -1,14 +1,25 @@
 /**
  * Sui service — policy reads and payment execution.
  *
- * SWAP POINT — Sui TypeScript SDK.
- *   readTreasuryPolicy() becomes an object read of the Treasury and
- *   AgentCapability objects. executePayment() becomes a PTB, signed by the
- *   zkLogin session and submitted through a sponsored transaction.
+ * WHY `executePayment` NOW THROWS.
+ *
+ * It used to return a fabricated receipt: a digest derived by hashing the
+ * invoice number, `network: "demo"`, a hardcoded epoch. The interface rendered
+ * that digest in monospace beside "Payment executed", indistinguishable from a
+ * real one, and no payment had been made. A $30,000 invoice was reported as
+ * settled against a $25,000 on-chain authorization that the path never
+ * consulted.
+ *
+ * A mock that returns something plausible is worse than one that fails: the
+ * failure is visible in a second, and the plausible lie survives all the way
+ * to a judge. So this refuses, loudly, until a real PTB is wired in.
+ *
+ * SWAP POINT — Sui TypeScript SDK. `executePayment` becomes a PTB signed by
+ * the zkLogin session. Until then, `/api/approval/preflight` asks the CHAIN
+ * what it would decide, which is a true answer rather than an invented one.
  *
  * What must NOT move into the interface: the decision about whether a payment
- * is allowed. That answer comes from enforcePolicy() today and from the Move
- * module tomorrow — never from a component.
+ * is allowed. That answer comes from Move — never from a component.
  */
 
 import type { AgentCapability, PaymentRequest, TreasuryPolicy } from "../types";
@@ -86,15 +97,27 @@ function digestFor(request: PaymentRequest): string {
  * Mock execution. It is only ever called after enforcePolicy() has approved
  * the request — the interface does not get to skip that step.
  */
+export class PaymentExecutionUnavailableError extends Error {
+  readonly code = "EXECUTION_NOT_WIRED";
+  constructor(readonly request: PaymentRequest) {
+    super(
+      `No payment was submitted for ${request.invoiceNumber}. On-chain execution is not wired ` +
+        "up in this build, and this function will not invent a receipt for a payment that did " +
+        "not happen. Use the on-chain preflight to see what Sui would decide.",
+    );
+    this.name = "PaymentExecutionUnavailableError";
+  }
+}
+
+/**
+ * Refuses, by design.
+ *
+ * There is deliberately no success path. Returning a receipt here would be
+ * claiming a settlement that never reached a validator, which is exactly the
+ * bug this replaced.
+ */
 export async function executePayment(request: PaymentRequest): Promise<ExecutionReceipt> {
-  return {
-    digest: digestFor(request),
-    target: `${DEMO_OBJECTS.packageId.slice(0, 10)}…::treasury::execute_payment`,
-    network: "demo",
-    executedAt: new Date().toISOString(),
-    gasSponsored: true,
-    epoch: 482,
-  };
+  throw new PaymentExecutionUnavailableError(request);
 }
 
 export function explorerUrl(digest: string, network: OnChainPolicy["network"]): string | null {

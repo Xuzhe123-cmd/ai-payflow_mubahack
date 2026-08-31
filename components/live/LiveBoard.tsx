@@ -136,7 +136,11 @@ export default function LiveBoard({ initialBoard, initialError, asOf }: LiveBoar
       <div className="grid gap-4 text-xs text-ink-faint md:grid-cols-3">
         <ValueTile label="Agent can settle alone" value={summary.autonomousValueCents} tone="text-pos" />
         <ValueTile label="Waiting on a person" value={summary.needsHumanValueCents} tone="text-warn" />
-        <ValueTile label="Blocked on chain rules" value={summary.blockedValueCents} tone="text-neg" />
+        <ValueTile
+          label="Would be blocked by Sui"
+          value={summary.blockedValueCents}
+          tone="text-neg"
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">

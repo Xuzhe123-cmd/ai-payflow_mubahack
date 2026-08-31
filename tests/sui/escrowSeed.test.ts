@@ -34,7 +34,16 @@ import {
 } from "../../scripts/lib/escrowSeedPlan";
 
 const V1 = "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d";
-const V2 = "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578";
+/**
+ * The package that DEFINED escrow and oracle.
+ *
+ * v2, and permanently so: a type is anchored to the version that introduced
+ * its module, and later upgrades do not move it. Distinct from CALLS, which
+ * always target the newest package.
+ */
+const V2_ORIGIN = "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578";
+/** The current live package, for CALLS. Bumped by each upgrade. */
+const V3_CALLS = "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690";
 const TREASURY = "0x15f45303f80c591ea9777da30386c650df73a9277e478f43e128af123a57dd5a";
 const OWNER = "0xa09bfa3a1f78f168c2970cff756592b7376be0ac947d845aedc4c0781d270609";
 /** The capability the partial run really created. */
@@ -45,7 +54,7 @@ const live = JSON.parse(
 ) as DeploymentManifest;
 
 const expectation: OracleCapExpectation = {
-  expectedType: `${V2}::oracle::OracleCap`,
+  expectedType: `${V2_ORIGIN}::oracle::OracleCap`,
   expectedTreasuryId: TREASURY,
   expectedOwner: OWNER,
   expectedOracleId: "demo_shipment_oracle",
@@ -54,7 +63,7 @@ const expectation: OracleCapExpectation = {
 function existing(overrides: Partial<ExistingOracleCap> = {}): ExistingOracleCap {
   return {
     objectId: REAL_CAP,
-    objectType: `${V2}::oracle::OracleCap`,
+    objectType: `${V2_ORIGIN}::oracle::OracleCap`,
     owner: OWNER,
     treasuryId: TREASURY,
     oracleId: "demo_shipment_oracle",
@@ -67,9 +76,9 @@ describe("types resolve to the package that defined the module", () => {
     // The exact failure: the seed asked for the v1 type and the chain had made
     // a v2 object, so `requireCreatedObject` found nothing.
     const types = structTypesFor(live);
-    expect(types.oracleCap).toBe(`${V2}::oracle::OracleCap`);
-    expect(types.shipmentAttestation).toBe(`${V2}::oracle::ShipmentAttestation`);
-    expect(types.paymentEscrow).toBe(`${V2}::escrow::PaymentEscrow`);
+    expect(types.oracleCap).toBe(`${V2_ORIGIN}::oracle::OracleCap`);
+    expect(types.shipmentAttestation).toBe(`${V2_ORIGIN}::oracle::ShipmentAttestation`);
+    expect(types.paymentEscrow).toBe(`${V2_ORIGIN}::escrow::PaymentEscrow`);
   });
 
   it("leaves types from the original publish on v1", () => {
@@ -84,8 +93,8 @@ describe("types resolve to the package that defined the module", () => {
     // Verified by reading the live objects: AgentCap kept v1 while the newly
     // added OracleCap is at v2. The two live at different packages, and that is
     // correct rather than a mistake to normalise away.
-    expect(modulePackageId(live, "oracle")).toBe(V2);
-    expect(modulePackageId(live, "escrow")).toBe(V2);
+    expect(modulePackageId(live, "oracle")).toBe(V2_ORIGIN);
+    expect(modulePackageId(live, "escrow")).toBe(V2_ORIGIN);
     expect(modulePackageId(live, "agent")).toBe(V1);
     expect(modulePackageId(live, "invoice")).toBe(V1);
     // A module nobody recorded belongs to the original publish.
@@ -100,7 +109,7 @@ describe("types resolve to the package that defined the module", () => {
   });
 
   it("sends calls to v2", () => {
-    expect(callPackageId(live)).toBe(V2);
+    expect(callPackageId(live)).toBe(V3_CALLS);
   });
 
   it("still agrees with the single-package helper before any upgrade", () => {

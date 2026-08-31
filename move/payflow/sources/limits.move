@@ -51,9 +51,11 @@ public(package) fun new_human_approval(
 ): Limits {
     Limits {
         authority: AUTHORITY_HUMAN_APPROVAL,
-        // Reaching this constructor at all requires holding an approval, which
-        // only an ApproverCap holder can mint. Authorization is therefore
-        // established by possession, exactly as it is for the agent.
+        // Holding an approval object establishes that ONE was minted; whether
+        // it still authorises anything is the `enabled` flag below, which
+        // `approval::limits_for` recomputes from treasury state on every call.
+        // Possession is no longer the authority — it was, under `ApproverCap`,
+        // and that is precisely what could not be revoked.
         authorized: true,
         enabled,
         max_single,
