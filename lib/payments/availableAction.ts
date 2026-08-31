@@ -121,8 +121,11 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
       lead: null,
       status: "Payment released",
       detail: `${amount} released from escrow to ${supplier}.`,
+      // The chain of facts that produced the release, in the order it happened,
+      // so a reader can see it occurred ONCE rather than inferring a retry.
       facts: [
-        "Shipment confirmed by the oracle",
+        "Shipment confirmed",
+        "Oracle attestation confirmed",
         "Escrow condition satisfied",
         "Payment settled on chain",
         "No further payment action available",
@@ -274,9 +277,9 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
       return {
         action: "EXECUTE_PAYMENT",
         label: "Execute payment",
-        headline: "APPROVED",
-        lead: null,
-        status: "Approved · ready to execute",
+        headline: "AUTHORIZED · READY",
+        lead: "Policy checks passed",
+        status: "Authorized · ready to execute",
         detail:
           `${amount} is within the agent's authority and all Sui safety checks passed. ` +
           "No payment has been submitted yet.",
@@ -327,9 +330,11 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
         return {
           action: "EXECUTE_PAYMENT",
           label: "Execute payment",
-          headline: "APPROVED BY HUMAN",
-          lead: "Policy checks passed",
-          status: "Approved by human · ready to execute",
+          // The same state as the autonomous case — authorized, not executed —
+          // so it gets the same headline. WHO authorized it belongs in the lead.
+          headline: "AUTHORIZED · READY",
+          lead: "Approved by a person · policy checks passed",
+          status: "Authorized · ready to execute",
           detail:
             `${amount} was authorized by a person and re-checked against every on-chain rule ` +
             "under the approver's limits. No payment has been submitted yet.",
@@ -343,11 +348,13 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
       return {
         action: "APPROVE",
         label: "Approve payment",
-        headline: "HUMAN APPROVAL REQUIRED",
+        // Awaiting a person, not refused by one. Nothing about this payment has
+        // failed — it is above the limit the agent may act on alone.
+        headline: "AWAITING APPROVAL",
         // The checks DID pass — what failed is the agent's authority to act
         // alone. Leading with the pass keeps the two apart.
         lead: "Policy checks passed",
-        status: "Human approval required",
+        status: "Awaiting approval",
         detail: input.autonomy.reason,
         facts: [],
         tone: "warning",
@@ -361,9 +368,12 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
       return {
         action: "NONE",
         label: null,
-        headline: refused ? "REJECTED" : "NO PAYMENT",
+        // A payment genuinely refused BEFORE any money moved. Distinct from a
+        // settled invoice whose guard refuses a SECOND payment — that case
+        // never reaches here, because settlement is branch 1.
+        headline: refused ? "PAYMENT REJECTED" : "NO PAYMENT",
         lead: null,
-        status: refused ? "Rejected" : "No payment",
+        status: refused ? "Payment rejected" : "No payment",
         detail: input.autonomy.reason,
         facts: ["No payment action available"],
         tone: refused ? "negative" : "neutral",
@@ -391,7 +401,7 @@ export function offersPaymentControl(state: PaymentActionState): boolean {
  * ESCROWED is deliberately absent: the treasury has parted with the money and
  * the supplier has not received it, which is not settlement.
  */
-function isPaidOnChain(status: string | null | undefined): boolean {
+export function isPaidOnChain(status: string | null | undefined): boolean {
   return status === "PAID" || status === "SETTLED";
 }
 

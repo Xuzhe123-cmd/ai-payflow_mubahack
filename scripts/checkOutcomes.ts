@@ -9,6 +9,7 @@
  */
 
 import { availablePaymentAction } from "../lib/payments/availableAction";
+import { describeInvoiceStatus } from "../lib/payments/invoiceStatus";
 import { decideAutonomy } from "../lib/payments/autonomy";
 import type { EscrowDemoStage } from "../lib/escrow/demoFlow";
 
@@ -53,10 +54,26 @@ async function main() {
       hasReceipt: false,
     });
 
+    // NOTE on the `outcome` column: it is the ACTION BOX's headline. An invoice
+    // awaiting a person is routed to the approval component before the action
+    // box is reached, so it prints "NO PAYMENT" here while the page shows the
+    // approval step. The badge and tab columns are what the list actually uses.
+    const badge = describeInvoiceStatus({
+      runStatus: "ANALYZED",
+      finalOutcome: analysis.finalOutcome,
+      chainInvoiceStatus: invoice.chainStatus,
+      conditionStage: condition?.stage ?? null,
+    });
+
     console.log(
       `${invoice.invoiceNumber.padEnd(14)} chain=${String(invoice.chainStatus).padEnd(9)} ` +
-        `ai=${String(analysis.decision.action).padEnd(12)} → ${action.headline.padEnd(24)} ` +
-        `button=${action.label ?? "none"}`,
+        `ai=${String(analysis.decision.action).padEnd(12)} ` +
+        `risk=${String(analysis.decision.risk).padEnd(9)} ` +
+        `badge=[${badge.label}]`.padEnd(26) +
+        // The tab the /invoices page files it under. Printed beside the badge
+        // because the bug was these two disagreeing on the same row.
+        `tab=${badge.category.padEnd(10)} ` +
+        `outcome=${action.headline.padEnd(24)} button=${action.label ?? "none"}`,
     );
   }
 }

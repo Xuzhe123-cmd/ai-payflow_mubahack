@@ -21,7 +21,28 @@
 import type { Cents } from "../types";
 import type { AnalysisResponse } from "../services/contracts";
 
-export type OracleSignalState = "VERIFIED" | "LIVE" | "MISMATCH" | "UNAVAILABLE" | "COUNT";
+export type OracleSignalState =
+  /** The chain re-derived this fact and agreed with it. */
+  | "VERIFIED"
+  /** Supplied live, and outside what the chain can check. */
+  | "LIVE"
+  /**
+   * The chain re-derived this fact and DISAGREED. A genuine problem with the
+   * data — a redirected wallet, a supplier not in the registry.
+   */
+  | "MISMATCH"
+  /**
+   * The chain records this invoice as already settled.
+   *
+   * NOT a mismatch, and the distinction is the whole reason this state exists.
+   * A settled invoice is the oracle and the chain in perfect agreement: the
+   * document says what it says, and the payment already happened. Reported as
+   * MISMATCH it made a correctly-paid invoice raise "Discrepancy found", which
+   * says the oracle data is wrong when nothing is wrong at all.
+   */
+  | "SETTLED"
+  | "UNAVAILABLE"
+  | "COUNT";
 
 export interface OracleSignal {
   label: string;
@@ -40,7 +61,12 @@ export interface OracleFeed {
   signals: OracleSignal[];
   sourceLabel: string;
   sourceDetail: string;
-  /** Every signal the chain could check, checked out. */
+  /**
+   * Every signal the chain could check, checked out.
+   *
+   * SETTLED does not count against this. An invoice already being paid is a
+   * settlement state, not evidence that the oracle data disagrees with chain.
+   */
   allVerified: boolean;
 }
 
@@ -136,10 +162,12 @@ export function buildInvoiceOracleFeed(analysis: AnalysisResponse): OracleFeed {
   const signals: OracleSignal[] = [
     {
       label: "Invoice data",
-      state: val.isDuplicate ? "MISMATCH" : "VERIFIED",
-      value: val.isDuplicate ? "already settled" : money(inv.amountCents),
+      // Settled is its own state, deliberately not MISMATCH. The invoice data
+      // is correct AND the invoice is paid; those are two facts that agree.
+      state: val.isDuplicate ? "SETTLED" : "VERIFIED",
+      value: val.isDuplicate ? "settled on chain" : money(inv.amountCents),
       detail: val.isDuplicate
-        ? `${inv.invoiceNumber} is recorded as paid on chain, so it cannot be paid again.`
+        ? `${inv.invoiceNumber} is recorded as paid on chain. The data matches; the payment has already been made, and the chain refuses a second one.`
         : `${inv.invoiceNumber}, due ${inv.dueDate}, extracted from the supplier document.`,
       chainVerified: true,
     },

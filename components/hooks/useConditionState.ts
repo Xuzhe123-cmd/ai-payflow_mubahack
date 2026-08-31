@@ -57,12 +57,21 @@ async function loadConditions(): Promise<Map<string, ConditionState>> {
   return byInvoice;
 }
 
-export function useConditionState(invoiceNumber: string): {
-  condition: ConditionState | null;
-  /** False until the chain has been consulted. Nothing should render before. */
+/** Stable empty map, so an unresolved read does not re-render on identity. */
+const EMPTY: Map<string, ConditionState> = new Map();
+
+/**
+ * Every conditional invoice's escrow state at once.
+ *
+ * One response covers all of them, and the invoice LIST needs the whole set:
+ * an escrow at HELD belongs in a held bucket and an escrow at RELEASED belongs
+ * in the paid one, and neither fact is visible from the local run.
+ */
+export function useConditionStates(): {
+  byInvoice: Map<string, ConditionState>;
   resolved: boolean;
 } {
-  const [condition, setCondition] = useState<ConditionState | null>(null);
+  const [byInvoice, setByInvoice] = useState<Map<string, ConditionState>>(EMPTY);
   const [resolved, setResolved] = useState(false);
 
   useEffect(() => {
@@ -70,14 +79,13 @@ export function useConditionState(invoiceNumber: string): {
     inFlight ??= loadConditions();
 
     void inFlight
-      .then((byInvoice) => {
-        if (cancelled) return;
-        setCondition(byInvoice.get(invoiceNumber) ?? null);
+      .then((loaded) => {
+        if (!cancelled) setByInvoice(loaded);
       })
       .catch(() => {
         // Unreachable endpoint. Treated as "no condition known", which shows an
         // ordinary invoice rather than inventing an escrow state.
-        if (!cancelled) setCondition(null);
+        if (!cancelled) setByInvoice(EMPTY);
       })
       .finally(() => {
         if (!cancelled) setResolved(true);
@@ -86,9 +94,18 @@ export function useConditionState(invoiceNumber: string): {
     return () => {
       cancelled = true;
     };
-  }, [invoiceNumber]);
+  }, []);
 
-  return { condition, resolved };
+  return { byInvoice, resolved };
+}
+
+export function useConditionState(invoiceNumber: string): {
+  condition: ConditionState | null;
+  /** False until the chain has been consulted. Nothing should render before. */
+  resolved: boolean;
+} {
+  const { byInvoice, resolved } = useConditionStates();
+  return { condition: byInvoice.get(invoiceNumber) ?? null, resolved };
 }
 
 /** Drops the cache so the next read hits the chain again. */

@@ -16,7 +16,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { evaluateShipmentEvidence } from "../../lib/oracle/evidence";
+import {
+  chainSettlementSummary,
+  evaluateShipmentEvidence,
+  evidenceBadge,
+  evidenceConclusion,
+  oracleStatusWord,
+} from "../../lib/oracle/evidence";
 import { proofCardRows } from "../../lib/escrow/present";
 import { availablePaymentAction } from "../../lib/payments/availableAction";
 import { decideAutonomy } from "../../lib/payments/autonomy";
@@ -102,16 +108,34 @@ describe("where the evidence section appears", () => {
     expect(PANEL).not.toMatch(/const oracleConfirmed =\s*\n?\s*attestation !== null/);
   });
 
-  it("names the three layers separately", () => {
-    // Evidence, attestation and enforcement are three different claims, and the
+  it("names the layers separately", () => {
+    // Evidence, verdict and enforcement are three different claims, and the
     // section exists to keep them apart.
     expect(PANEL).toContain("Shipment proof");
-    expect(PANEL).toContain("Oracle attestation");
-    expect(PANEL).toContain("Sui escrow");
+    expect(PANEL).toContain("Sui escrow condition");
+    expect(PANEL).toContain("evidenceBadge");
+  });
+
+  it("keeps the oracle's evidence and the chain's settlement in separate blocks", () => {
+    // The two questions that were being run together: what the oracle
+    // established, and what Sui did with the money. A settled invoice reported
+    // inside the evidence block is what produced "Discrepancy found" on an
+    // invoice that had in fact been paid correctly.
+    expect(PANEL).toContain("Real-world facts");
+    expect(PANEL).toContain("Chain settlement");
+    expect(PANEL).toContain("chainSettlementSummary");
+  });
+
+  it("states the verdict through the shared badge rule, never as verified on chain", () => {
+    // The chain holds an escrow object. That is not evidence a lorry arrived,
+    // and no badge on this panel may imply it is.
+    expect(PANEL).toContain("evidenceBadge");
+    expect(PANEL).not.toContain("Verified on chain");
+    expect(PANEL).not.toContain("Verified by chain");
   });
 
   it("says the oracle does not move funds", () => {
-    expect(PANEL).toContain("does not\n              move funds");
+    expect(PANEL.replace(/\s+/g, " ")).toContain("The oracle does not move funds.");
   });
 });
 
@@ -200,5 +224,134 @@ describe("what the escrow box reports", () => {
     expect(action.action).toBe("NONE");
     // Held is not rejected. Conflating the two misrepresents what escrow does.
     expect(action.status.toLowerCase()).not.toContain("reject");
+  });
+});
+
+// --- evidence and settlement are two different questions ---------------------
+
+describe("what the badge over the evidence may claim", () => {
+  it("says ORACLE CONFIRMED only where the shared rule confirms", () => {
+    expect(evidenceBadge("CONFIRMED")).toBe("ORACLE CONFIRMED");
+  });
+
+  it("says ORACLE WAITING where nothing has attested", () => {
+    // Not a failure and not a refusal. The oracle has not spoken, and a proof
+    // document sitting on file is not the oracle speaking.
+    expect(evidenceBadge("NO_PROOF")).toBe("ORACLE WAITING");
+    expect(evidenceBadge("AWAITING_ATTESTATION")).toBe("ORACLE WAITING");
+    expect(oracleStatusWord("AWAITING_ATTESTATION")).toBe("WAITING");
+  });
+
+  it("says SHIPMENT NOT CONFIRMED where an attestation actually declined", () => {
+    // A real, negative answer — different from silence, and worded differently.
+    for (const verdict of ["NOT_CONFIRMED", "HASH_MISMATCH", "SUBJECT_MISMATCH"] as const) {
+      expect(evidenceBadge(verdict)).toBe("SHIPMENT NOT CONFIRMED");
+      expect(oracleStatusWord(verdict)).toBe("NOT CONFIRMED");
+    }
+  });
+
+  it("never claims the chain verified the shipment", () => {
+    // The chain can establish that an escrow exists, is LOCKED or RELEASED, and
+    // that an attestation's digest matches the document. It cannot establish
+    // that a delivery happened, so no badge here may say so.
+    const badges = (["NO_PROOF", "AWAITING_ATTESTATION", "NOT_CONFIRMED", "HASH_MISMATCH",
+      "SUBJECT_MISMATCH", "CONFIRMED"] as const).map(evidenceBadge);
+
+    for (const badge of badges) {
+      expect(badge.toLowerCase()).not.toContain("verified on chain");
+      expect(badge.toLowerCase()).not.toContain("verified");
+    }
+  });
+});
+
+describe("what the evidence concludes", () => {
+  it("ticks the whole chain for a confirmed, released shipment", () => {
+    const conclusion = evidenceConclusion({
+      invoiceNumber: INVOICE,
+      proof: PROOF,
+      attestation: ATTESTATION,
+      released: true,
+    });
+
+    expect(conclusion.ok).toBe(true);
+    expect(conclusion.headline).toBe("Shipment confirmed");
+    expect(conclusion.checks.map((check) => check.label)).toEqual([
+      "Proof hash matches attestation",
+      "Shipment confirmed",
+      "Escrow condition satisfied",
+      "Payment released",
+    ]);
+    expect(conclusion.checks.every((check) => check.ok)).toBe(true);
+  });
+
+  it("reports a proof with no attestation as pending, not as a discrepancy", () => {
+    // A document exists and nothing has read it. That is waiting, and calling
+    // it a mismatch would blame the evidence for the oracle's silence.
+    const conclusion = evidenceConclusion({
+      invoiceNumber: INVOICE,
+      proof: PROOF,
+      attestation: null,
+      released: false,
+    });
+
+    expect(conclusion.ok).toBe(false);
+    expect(conclusion.headline).toBe("Shipment confirmation pending");
+    expect(conclusion.detail).toContain("Proof available — not yet confirmed by oracle");
+    expect(conclusion.detail).toContain("No confirmed oracle attestation exists");
+    expect(conclusion.headline.toLowerCase()).not.toContain("discrepan");
+  });
+
+  it("does not let a proof document alone imply the oracle verified it", () => {
+    // The claim the whole panel exists to refuse.
+    const conclusion = evidenceConclusion({
+      invoiceNumber: INVOICE,
+      proof: PROOF,
+      attestation: null,
+      released: false,
+    });
+
+    expect(conclusion.checks.some((check) => check.ok)).toBe(false);
+    expect(conclusion.checks.map((check) => check.label)).toContain(
+      "No confirmed oracle attestation exists",
+    );
+  });
+
+  it("names the failing clause when an attestation declines", () => {
+    const conclusion = evidenceConclusion({
+      invoiceNumber: INVOICE,
+      proof: { ...PROOF, sha256: "f".repeat(64) },
+      attestation: ATTESTATION,
+      released: false,
+    });
+
+    expect(conclusion.headline).toBe("Shipment not confirmed");
+    expect(conclusion.checks[0].label).toBe("Proof hash does not match the attestation");
+  });
+});
+
+describe("chain settlement, stated apart from the evidence", () => {
+  it("reports a release as released, with the amount that moved", () => {
+    const settlement = chainSettlementSummary({ released: true, amountLabel: "$4,800" });
+
+    expect(settlement.headline).toBe("Payment released");
+    expect(settlement.amountLabel).toBe("$4,800");
+    expect(settlement.headline.toLowerCase()).not.toContain("discrepan");
+    expect(settlement.headline.toLowerCase()).not.toContain("reject");
+  });
+
+  it("reports a hold as held, and says the supplier has not been paid", () => {
+    // The distinction a held escrow must never blur: the money has left the
+    // treasury AND the supplier does not have it.
+    const settlement = chainSettlementSummary({ released: false, amountLabel: "$4,000" });
+
+    expect(settlement.headline).toBe("Payment held in escrow");
+    expect(settlement.detail).toBe("$4,000 remains locked. Supplier has not been paid.");
+  });
+
+  it("is derived from the escrow alone, never from the oracle's verdict", () => {
+    // Same settlement input, and the summary does not take an evidence verdict
+    // at all — which is what stops one from being read as the other.
+    expect(chainSettlementSummary({ released: true, amountLabel: "$1" }).released).toBe(true);
+    expect(chainSettlementSummary({ released: false, amountLabel: "$1" }).released).toBe(false);
   });
 });

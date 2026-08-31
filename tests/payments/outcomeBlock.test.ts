@@ -81,14 +81,69 @@ describe("the recommendation block", () => {
   );
 
   it("qualifies a rejection when the invoice is already settled", () => {
-    // The AI section may still say "rejected" — it must say what it is
-    // rejecting. Left bare, it reads as though the original payment failed.
+    // The AI section must not call a completed payment "rejected". The wording
+    // comes from a tested rule rather than from the action label directly.
     expect(BLOCK).toContain("alreadySettled");
-    expect(BLOCK).toContain("NEW payment");
+    expect(BLOCK).toContain("describeRecommendation");
+    expect(BLOCK).toContain("wording.label");
+    // The raw label would say "Payment rejected" on a settled invoice.
+    expect(BLOCK).not.toContain("{ACTION_LABEL[decision.action]}");
   });
 
   it("decides that from chain state, not from the recommendation", () => {
     expect(BLOCK).toContain('chainInvoice?.status === "PAID"');
     expect(BLOCK).toContain('condition?.stage === "RELEASED"');
+  });
+});
+
+describe("the header badge", () => {
+  const BADGE = readFileSync(
+    resolve(process.cwd(), "components/common/StatusBadge.tsx"),
+    "utf8",
+  );
+
+  it("derives the label from the chain-first rule, not from finalOutcome", () => {
+    // The header used to map `finalOutcome` straight to a word, which is how a
+    // released payment came to be labelled "Rejected".
+    expect(BADGE).toContain("describeInvoiceStatus");
+    expect(BADGE).toContain("chainInvoiceStatus");
+    expect(BADGE).toContain("conditionStage");
+  });
+
+  it("is given the invoice number wherever it is rendered", () => {
+    // Without it the badge cannot look up chain state and silently falls back
+    // to the local run — which knows nothing of another session's payment.
+    for (const path of [
+      "components/invoices/InvoiceHeader.tsx",
+      "components/invoices/InvoiceTable.tsx",
+      "components/payments/PaymentTable.tsx",
+    ]) {
+      const source = readFileSync(resolve(process.cwd(), path), "utf8");
+      const rendered = source.match(/<StatusBadge[^>]*/g) ?? [];
+      expect(rendered.length, path).toBeGreaterThan(0);
+      for (const tag of rendered) {
+        expect(tag, path).toContain("invoiceNumber=");
+      }
+    }
+  });
+});
+
+describe("the chain state block", () => {
+  const BLOCK = SOURCE.slice(
+    SOURCE.indexOf("function ChainStateBlock"),
+    SOURCE.indexOf("function ChainOutcome"),
+  );
+
+  it("replaces 'nothing was submitted' when the chain holds something", () => {
+    // True of this session, false of the invoice: the escrow flow and earlier
+    // runs both submit transactions this browser never saw.
+    expect(SOURCE).toContain("if (settled || committed)");
+    expect(BLOCK).toContain("Sui / chain state");
+  });
+
+  it("reports oracle confirmation through the shared evidence rule", () => {
+    // Not from the presence of a proof document.
+    expect(BLOCK).toContain("evidence?.confirmed");
+    expect(SOURCE).toContain("evaluateShipmentEvidence");
   });
 });

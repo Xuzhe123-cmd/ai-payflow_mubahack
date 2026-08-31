@@ -28,6 +28,7 @@ import { readChainSnapshot } from "@/lib/sui/chainReader";
 import { createSuiQueries } from "@/lib/sui/client";
 import { explorerObjectUrl, structTypesFor } from "@/lib/sui/deployment";
 import { configuredNetwork, loadManifest } from "@/lib/sui/manifest";
+import { SUPPLIERS } from "@/lib/demo/suppliers";
 import { conditionalInvoiceSet } from "@/lib/escrow/conditionalSet";
 import * as escrowPlan from "@/lib/escrow/demoFlow";
 
@@ -86,9 +87,14 @@ export async function GET() {
           (entry) => entry.invoiceNumber === seeded.invoiceNumber,
         );
 
+        // Named so a page can label the payment without a lookup table keyed
+        // by invoice number — that table is how the demo pair became special.
+        const supplier = SUPPLIERS.find((entry) => entry.id === onChainInvoice?.supplierId);
+
         return {
           invoiceNumber: seeded.invoiceNumber,
           amountCents: seeded.amountCents,
+          supplierName: supplier?.name ?? onChainInvoice?.supplierId ?? "",
           recipient: escrow?.recipient ?? source?.document.recipient ?? "",
           stage,
           escrow: escrow
@@ -136,44 +142,6 @@ export async function GET() {
     const message = error instanceof Error ? error.message : "Unknown error reading escrow state";
     return NextResponse.json({ ok: false, message }, { status: 503 });
   }
-}
-
-/**
- * The invoices that carry a shipment condition, from the manifest AND the chain.
- *
- * The manifest is a starting point, never the authority: it records what the
- * seed created and knows nothing about anything created since. An invoice with
- * an escrow object, or sitting at ESCROWED, is conditional whether or not
- * anyone wrote it down locally.
- */
-function conditionalInvoices(
-  seeded: { invoiceNumber: string; amountCents: number }[],
-  onChain: { invoiceNumber: string; amountCents: number; status: string }[],
-  escrows: Map<string, ChainEscrowState>,
-): { invoiceNumber: string; amountCents: number }[] {
-  const byNumber = new Map<string, { invoiceNumber: string; amountCents: number }>();
-
-  for (const invoice of seeded) {
-    byNumber.set(invoice.invoiceNumber, invoice);
-  }
-
-  for (const invoice of onChain) {
-    if (byNumber.has(invoice.invoiceNumber)) continue;
-    const conditional =
-      escrows.has(invoice.invoiceNumber) ||
-      invoice.status === "ESCROWED" ||
-      invoice.status === "HELD";
-    if (conditional) {
-      byNumber.set(invoice.invoiceNumber, {
-        invoiceNumber: invoice.invoiceNumber,
-        amountCents: invoice.amountCents,
-      });
-    }
-  }
-
-  return [...byNumber.values()].sort((a, b) =>
-    a.invoiceNumber.localeCompare(b.invoiceNumber),
-  );
 }
 
 /** Every escrow on chain, keyed by the invoice number it settles. */

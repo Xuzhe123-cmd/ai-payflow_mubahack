@@ -28,8 +28,11 @@ export default function SecurityPage() {
   const blocked = entries.filter(
     (entry) => entry.run?.analysis?.enforcement?.outcome === "SUI_REJECT",
   );
-  const rejected = entries.filter((entry) => entry.outcome === "REJECTED");
-  const escalated = entries.filter((entry) => entry.outcome === "HUMAN_REVIEW");
+  // Categories, not raw outcomes. An invoice the guard refuses a SECOND payment
+  // for is settled, not rejected, and counting it here claimed the treasury had
+  // turned away a payment it had in fact made.
+  const rejected = entries.filter((entry) => entry.category === "rejected");
+  const escalated = entries.filter((entry) => entry.category === "review");
 
   return (
     <PageContainer>

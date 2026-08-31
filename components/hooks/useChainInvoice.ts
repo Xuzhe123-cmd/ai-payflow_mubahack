@@ -4,10 +4,11 @@
  * An invoice's own status on chain.
  *
  * Needed because a settled invoice does not necessarily leave a trace in this
- * browser. INV-2026-3455 was paid by a script, INV-2026-3501 by the escrow
- * release — neither produced a local run with a receipt, so asking the run
- * whether it was paid returns no, and the interface then falls through to the
- * AI recommendation, which refuses a SECOND payment and reads as "Rejected".
+ * browser. One demo invoice was paid by a seeding script and another by an
+ * escrow release — neither produced a local run with a receipt, so asking the
+ * run whether it was paid returns no, and the interface then falls through to
+ * the AI recommendation, which refuses a SECOND payment and reads as
+ * "Rejected".
  *
  * The invoice object knows. This asks it.
  *
@@ -46,12 +47,21 @@ async function loadInvoices(): Promise<Map<string, ChainInvoiceState>> {
   return byNumber;
 }
 
-export function useChainInvoice(invoiceNumber: string): {
-  invoice: ChainInvoiceState | null;
+/**
+ * Every invoice's chain status at once.
+ *
+ * The endpoint returns all of them in one response, so a LIST needs one call
+ * rather than one per row — and, more importantly, the list needs this at all.
+ * Categorising the invoice list from the local run alone is what filed a
+ * released escrow under "Rejected": the settlement happened in an earlier
+ * session and this browser had no record of it.
+ */
+export function useChainInvoices(): {
+  byNumber: Map<string, ChainInvoiceState>;
   /** False until the chain has been consulted. */
   resolved: boolean;
 } {
-  const [invoice, setInvoice] = useState<ChainInvoiceState | null>(null);
+  const [byNumber, setByNumber] = useState<Map<string, ChainInvoiceState>>(EMPTY);
   const [resolved, setResolved] = useState(false);
 
   useEffect(() => {
@@ -59,14 +69,13 @@ export function useChainInvoice(invoiceNumber: string): {
     inFlight ??= loadInvoices();
 
     void inFlight
-      .then((byNumber) => {
-        if (cancelled) return;
-        setInvoice(byNumber.get(invoiceNumber) ?? null);
+      .then((loaded) => {
+        if (!cancelled) setByNumber(loaded);
       })
       .catch(() => {
         // Unreachable endpoint. Treated as "status unknown", which falls back
         // to the local run rather than inventing a settlement.
-        if (!cancelled) setInvoice(null);
+        if (!cancelled) setByNumber(EMPTY);
       })
       .finally(() => {
         if (!cancelled) setResolved(true);
@@ -75,9 +84,21 @@ export function useChainInvoice(invoiceNumber: string): {
     return () => {
       cancelled = true;
     };
-  }, [invoiceNumber]);
+  }, []);
 
-  return { invoice, resolved };
+  return { byNumber, resolved };
+}
+
+/** Stable empty map, so an unresolved read does not re-render on identity. */
+const EMPTY: Map<string, ChainInvoiceState> = new Map();
+
+export function useChainInvoice(invoiceNumber: string): {
+  invoice: ChainInvoiceState | null;
+  /** False until the chain has been consulted. */
+  resolved: boolean;
+} {
+  const { byNumber, resolved } = useChainInvoices();
+  return { invoice: byNumber.get(invoiceNumber) ?? null, resolved };
 }
 
 /** Drops the cache so the next read hits the chain again. */

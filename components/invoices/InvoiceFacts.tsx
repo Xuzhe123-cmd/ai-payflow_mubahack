@@ -11,6 +11,7 @@ import {
   formatPercent,
   shortWallet,
 } from "@/lib/format";
+import { describeDuplicateCheck } from "@/lib/payments/invoiceStatus";
 import type { DeterministicAnalysis } from "@/lib/types";
 
 /** Section A — what the extractor read off the document. */
@@ -161,6 +162,15 @@ export function InvoiceValidation({ facts }: { facts: DeterministicAnalysis }) {
   const invoice = facts.invoiceFacts;
   const currency = invoice.currency;
 
+  // `isDuplicate` records that a payment already exists for this invoice
+  // number — that is, THIS invoice was settled. The invoice is not a duplicate;
+  // paying it again would be.
+  const duplicateCheck = describeDuplicateCheck({
+    invoiceNumber: invoice.invoiceNumber,
+    alreadySettled: validation.isDuplicate,
+    settledByPaymentId: validation.duplicateOfPaymentId,
+  });
+
   return (
     <Panel>
       <PanelHeader eyebrow="Invoice validation" title="Purchase order and duplicates" />
@@ -179,14 +189,21 @@ export function InvoiceValidation({ facts }: { facts: DeterministicAnalysis }) {
                     : `Invoice exceeds ${invoice.poNumber} by ${formatMoneyRounded(Math.abs(validation.poDeltaCents ?? 0), currency)}.`
             }
           />
+          {/* Label and detail come from one rule, so they cannot contradict
+              each other the way "✕ No duplicate detected / Already settled as
+              payment chain_0x927e…" did. */}
           <CheckRow
-            passed={!validation.isDuplicate}
-            label="No duplicate detected"
+            passed={duplicateCheck.passed}
+            // Settled is a finding, not a fault. A red cross here accuses a
+            // payment that completed exactly as intended.
+            tone={duplicateCheck.passed ? "verify" : "warn"}
+            label={duplicateCheck.label}
             detail={
-              validation.isDuplicate
-                ? `Already settled as payment ${validation.duplicateOfPaymentId}.`
-                : "This invoice number has not been paid before."
+              duplicateCheck.settlementReference
+                ? `${duplicateCheck.detail} Original settlement: ${duplicateCheck.settlementReference}.`
+                : duplicateCheck.detail
             }
+            note={duplicateCheck.preventionNote}
           />
           <CheckRow
             passed={(validation.amountVsSupplierMaxRatio ?? 0) <= 1}

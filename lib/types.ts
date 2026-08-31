@@ -153,6 +153,19 @@ export interface DiscountFacts {
   daysUntilDeadline: number;
 }
 
+/**
+ * One billed line, exactly as the document states it.
+ *
+ * Extracted rather than summarised, because the line items are where a PO
+ * overage is actually legible: a $14,700 invoice against a $9,800 order is an
+ * abstract discrepancy until you can see that the order covers the fixture
+ * plates and the invoice adds an expedite fee nobody approved.
+ */
+export interface InvoiceLineItem {
+  description: string;
+  amountCents: Cents;
+}
+
 export interface InvoiceFacts {
   invoiceNumber: string;
   supplierName: string;
@@ -168,6 +181,11 @@ export interface InvoiceFacts {
   extractionConfidence: Record<string, number>;
   /** Fields the extractor could not resolve from the document. */
   unresolvedFields: string[];
+  /**
+   * The billed lines, in document order. Empty when the document has no
+   * itemised section — never padded, and never inferred from the total.
+   */
+  lineItems: InvoiceLineItem[];
 }
 
 export interface SupplierFacts {
@@ -189,6 +207,21 @@ export interface ValidationFacts {
   /** invoice amount − PO amount. Positive means the invoice asks for more. */
   poDeltaCents: Cents | null;
   poMatch: boolean | null;
+  /**
+   * The matched purchase order's OWN fields, carried through so a screen can
+   * show the record the comparison actually ran against.
+   *
+   * They travel with the analysis rather than being looked up again in the
+   * browser: the interface must display the document the deterministic layer
+   * compared, not a second copy of it fetched by different code that could
+   * disagree. All null when no PO was matched.
+   */
+  poCurrency: string | null;
+  poDescription: string | null;
+  poIssuedAt: IsoDate | null;
+  poSupplierId: string | null;
+  /** Whether the order belongs to the supplier that sent this invoice. */
+  poSupplierMatch: boolean | null;
   amountVsSupplierMeanRatio: number | null;
   amountVsSupplierMaxRatio: number | null;
   currencyAllowed: boolean;
@@ -230,7 +263,23 @@ export type RiskEvidenceCode =
   | "SUPPLIER_NOT_IN_REGISTRY"
   | "SUPPLIER_NOT_APPROVED"
   | "WALLET_MISMATCH"
+  /**
+   * A SECOND invoice improperly repeating one already on file.
+   *
+   * Emphatically NOT "this invoice has been paid". That is
+   * INVOICE_ALREADY_SETTLED below, and conflating the two labelled the
+   * original, correctly-paid invoice a duplicate of itself.
+   */
   | "DUPLICATE_INVOICE"
+  /**
+   * This invoice is already settled on chain.
+   *
+   * Informational: a statement about what has happened, not an anomaly. It is
+   * still a blocking condition for a NEW payment — see blockingConditions —
+   * but that is a fact about a hypothetical second payment, not a risk carried
+   * by the completed one.
+   */
+  | "INVOICE_ALREADY_SETTLED"
   | "PO_NOT_FOUND"
   | "PO_AMOUNT_MISMATCH"
   | "AMOUNT_ABOVE_SUPPLIER_HISTORY"

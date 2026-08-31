@@ -16,6 +16,7 @@ import { RiskPanel, UrgencyPanel } from "@/components/invoices/RiskUrgencyPanels
 import { CashFlowAnalysis } from "@/components/invoices/CashFlowAnalysis";
 import { DecisionChain } from "@/components/payments/DecisionChain";
 import { ShipmentEvidence } from "@/components/payments/ShipmentEvidence";
+import { PurchaseOrderEvidence } from "@/components/invoices/PurchaseOrderEvidence";
 import { OracleCard } from "@/components/dashboard/OracleCard";
 import { PipelineStrip } from "@/components/dashboard/PipelineStrip";
 import { buildInvoiceOracleFeed } from "@/lib/oracle/feed";
@@ -100,8 +101,8 @@ export default function InvoiceAnalysisPage({
             </div>
             <OracleCard
               feed={buildInvoiceOracleFeed(analysis)}
-              title="Oracle data for this invoice"
-              subtitle="What the oracle asserted, and which of it the chain re-derived independently."
+              title="Reference data for this invoice"
+              subtitle="Invoice and supplier facts, and which of them the chain re-derived independently. Shipment confirmation is a separate question, answered above."
             />
           </div>
 
@@ -109,6 +110,10 @@ export default function InvoiceAnalysisPage({
               decided by chain state, never by an invoice number. An ordinary
               invoice shows nothing here. */}
           <ShipmentEvidence invoiceNumber={analysis.analysis.invoiceFacts.invoiceNumber} />
+
+          {/* Renders only for an invoice that cites a purchase order — decided
+              by the invoice's own PO reference, never by an invoice number. */}
+          <PurchaseOrderEvidence facts={analysis.analysis} />
 
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-5">
@@ -121,7 +126,14 @@ export default function InvoiceAnalysisPage({
             </div>
 
             <div className="space-y-5">
-              <RiskPanel facts={analysis.analysis} decision={analysis.decision} />
+              {/* The invoice number enables the chain lookup: a settled
+                  invoice is assessed on the payment that happened, not on a
+                  hypothetical new one the guard would refuse. */}
+              <RiskPanel
+                facts={analysis.analysis}
+                decision={analysis.decision}
+                invoiceNumber={analysis.analysis.invoiceFacts.invoiceNumber}
+              />
               <UrgencyPanel facts={analysis.analysis} decision={analysis.decision} />
               <ProvenanceCard
                 engineMode={analysis.engineMode}

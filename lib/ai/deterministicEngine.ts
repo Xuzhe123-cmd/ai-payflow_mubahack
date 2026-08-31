@@ -25,13 +25,38 @@ import type {
   TreasuryDecisionEngine,
 } from "../types";
 import { formatMoneyRounded } from "../util/money";
-import { blockingConditions } from "./blockingConditions";
+import { blockedOnlyBySettlement, blockingConditions } from "./blockingConditions";
 
 const money = (cents: number) => formatMoneyRounded(cents);
 
 /** The first candidate date the chain would accept on reserve grounds. */
 function firstAcceptable(analysis: Readonly<DeterministicAnalysis>): CashFlowScenario | null {
   return analysis.cashFlowScenarios.find((candidate) => !candidate.reserveBreach) ?? null;
+}
+
+/**
+ * The purchase-order overage, in words, when there is one.
+ *
+ * Exists because two branches below used to state flatly that "nothing about
+ * this invoice is suspicious" while the analysis they were describing carried a
+ * PO_AMOUNT_MISMATCH observation recording a $4,900 unapproved overage. The
+ * prose contradicted the evidence sitting beside it on the same screen.
+ *
+ * It changes no ACTION. A PO overage is not a blocking condition and this does
+ * not make it one — the recommendation is unchanged, and only what the engine
+ * says about it, and how severely it rates it, are corrected.
+ */
+function poOverage(analysis: Readonly<DeterministicAnalysis>): string | null {
+  const { validationFacts: val, invoiceFacts: inv } = analysis;
+  if (!val.poFound || val.poMatch !== false) return null;
+
+  const delta = val.poDeltaCents ?? 0;
+  const over = delta > 0;
+  return (
+    `${money(inv.amountCents)} is billed against ${inv.poNumber ?? "the purchase order"}, ` +
+    `which authorises ${money(val.poAmountCents ?? 0)} — ` +
+    `${over ? "an unapproved overage of" : "short by"} ${money(Math.abs(delta))}.`
+  );
 }
 
 export function decideDeterministically(
@@ -43,6 +68,30 @@ export function decideDeterministically(
   const acceptable = firstAcceptable(analysis);
 
   if (blocking.length > 0) {
+    // ALREADY PAID IS NOT AN ALARM.
+    //
+    // Both a redirected remit wallet and a completed payment stop a payment,
+    // and treating them alike raised CRITICAL — the interface's loudest signal
+    // — over an invoice whose money had reached the supplier exactly as
+    // intended. Nothing is wrong with a settled invoice; there is simply
+    // nothing left to pay.
+    //
+    // The REJECT stands and the blocking list is untouched, so no second
+    // payment can be recommended. Only the severity and the wording change.
+    if (blockedOnlyBySettlement(analysis)) {
+      return build("REJECT", null, blocking, {
+        risk: "LOW",
+        riskExplanation:
+          `${inv.invoiceNumber} was already settled on chain, and nothing about it is ` +
+          "suspicious — the supplier, remit address and currency all check out. A further " +
+          "payment would be a duplicate, so none is recommended.",
+        cashFlowExplanation: "The payment has already been made. Timing does not arise.",
+        decisionExplanation:
+          "This invoice is already settled. No new payment is recommended, and the completed " +
+          "payment is unaffected.",
+      });
+    }
+
     return build("REJECT", null, blocking, {
       risk: "CRITICAL",
       riskExplanation: blocking.join(" "),
@@ -59,22 +108,31 @@ export function decideDeterministically(
     const detail = overSingle
       ? `${money(inv.amountCents)} exceeds the agent's ${money(pol.maxSinglePaymentCents)} autonomous payment limit.`
       : `${money(inv.amountCents)} would take today's spend past the ${money(pol.dailyLimitCents)} daily limit.`;
+
+    // The PO comparison is named where it disagrees. Saying "nothing is
+    // suspicious" over a recorded overage is a false statement about the very
+    // evidence the page displays underneath it.
+    const overage = poOverage(analysis);
     return build(
       "HUMAN_REVIEW",
       null,
       [
         "The supplier is approved and the remit address matches the registry.",
+        ...(overage ? [overage] : []),
         detail,
         "The company can afford the payment; the agent is not authorized to make it alone.",
       ],
       {
-        risk: "LOW",
-        riskExplanation:
-          "Nothing about this invoice is suspicious — the supplier, address and currency all check out.",
+        risk: overage ? "MEDIUM" : "LOW",
+        riskExplanation: overage
+          ? `The supplier, address and currency all check out. ${overage} That discrepancy is what a reviewer should look at first.`
+          : "Nothing about this invoice is suspicious — the supplier, address and currency all check out.",
         cashFlowExplanation: today
           ? `Paying would leave ${money(today.projectedMinimumCashCents)} at the projected trough, against a ${money(pol.minimumReserveCents)} reserve.`
           : "",
-        decisionExplanation: `${detail} Human approval is required before it can settle.`,
+        decisionExplanation: overage
+          ? `${detail} ${overage} Human approval is required before it can settle.`
+          : `${detail} Human approval is required before it can settle.`,
       },
     );
   }
@@ -100,8 +158,12 @@ export function decideDeterministically(
   const action: TreasuryAction = payingToday ? "AUTO_PAY" : "SCHEDULE";
   const chosen = payingToday ? today! : acceptable;
 
+  const overage = poOverage(analysis);
   const reasons = [
     "The supplier is approved and the remit address matches the registry.",
+    // Named before the affordability line, because it is the fact a reader
+    // would most want to have been told about.
+    ...(overage ? [overage] : []),
     `${money(inv.amountCents)} is within the agent's ${money(pol.maxSinglePaymentCents)} autonomous limit.`,
     `Paying on ${chosen.paymentDate} leaves a projected ${money(chosen.projectedMinimumCashCents)} trough, above the ${money(pol.minimumReserveCents)} reserve.`,
   ];
@@ -113,9 +175,10 @@ export function decideDeterministically(
   if (urg.isOverdue) reasons.push(`This invoice is ${Math.abs(urg.daysUntilDue)} day(s) overdue.`);
 
   return build(action, chosen.paymentDate, reasons, {
-    risk: "LOW",
-    riskExplanation:
-      "Approved supplier, matching recipient wallet, permitted currency, and no prior settlement.",
+    risk: overage ? "MEDIUM" : "LOW",
+    riskExplanation: overage
+      ? `Approved supplier, matching recipient wallet, permitted currency, and no prior settlement. ${overage}`
+      : "Approved supplier, matching recipient wallet, permitted currency, and no prior settlement.",
     cashFlowExplanation: `Paying on ${chosen.paymentDate} projects a ${money(chosen.projectedMinimumCashCents)} trough against a ${money(pol.minimumReserveCents)} reserve.`,
     whyNotTodayExplanation:
       payingToday || today === null

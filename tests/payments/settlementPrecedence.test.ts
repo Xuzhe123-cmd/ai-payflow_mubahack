@@ -120,6 +120,61 @@ describe("a settled invoice, with the AI recommending rejection", () => {
       expect(state.headline).toBe("PAID");
     }
   });
+
+  it("stays PAYMENT RELEASED even where the AI still recommends paying it", () => {
+    // The subtler direction of the same bug. A stale AUTO_PAY on an invoice the
+    // escrow has already released must not offer to pay it, and must not
+    // describe it as anything but released.
+    for (const autonomy of [PAY_NOW, NEEDS_HUMAN, REJECTED]) {
+      const state = availablePaymentAction(
+        input({ autonomy, conditionStage: "RELEASED", chainInvoiceStatus: "PAID" }),
+      );
+
+      expect(state.headline).toBe("PAYMENT RELEASED");
+      expect(state.settled).toBe(true);
+      expect(offersPaymentControl(state)).toBe(false);
+    }
+  });
+
+  it("reports the release as a single completed sequence", () => {
+    // The outcome box is where a reader decides whether this happened once or
+    // twice. Every line is a fact about the ONE release that occurred.
+    const state = availablePaymentAction(
+      input({
+        autonomy: REJECTED,
+        conditionStage: "RELEASED",
+        chainInvoiceStatus: "PAID",
+        supplierName: "NORTHWIND COMPONENTS LTD",
+      }),
+    );
+
+    expect(state.detail).toBe("$4,800 released from escrow to NORTHWIND COMPONENTS LTD.");
+    expect(state.facts).toEqual([
+      "Shipment confirmed",
+      "Oracle attestation confirmed",
+      "Escrow condition satisfied",
+      "Payment settled on chain",
+      "No further payment action available",
+    ]);
+  });
+
+  it("never says rejected or duplicate anywhere in a settled outcome", () => {
+    // The words that made a completed payment read as a failed one, banned
+    // across every field the box renders rather than just the headline.
+    for (const settled of [
+      input({ autonomy: REJECTED, conditionStage: "RELEASED", chainInvoiceStatus: "PAID" }),
+      input({ autonomy: REJECTED, chainInvoiceStatus: "PAID" }),
+    ]) {
+      const state = availablePaymentAction(settled);
+      const text = [state.headline, state.status, state.detail, ...state.facts]
+        .join(" ")
+        .toLowerCase();
+
+      expect(text).not.toContain("reject");
+      expect(text).not.toContain("duplicate");
+      expect(text).not.toContain("blocked");
+    }
+  });
 });
 
 describe("an unsettled invoice", () => {
@@ -155,11 +210,12 @@ describe("an unsettled invoice", () => {
     expect(state.fundsLocked).toBe(true);
   });
 
-  it("reports APPROVED · ready to execute for an unpaid AUTO_PAY invoice", () => {
+  it("reports AUTHORIZED · READY for an unpaid AUTO_PAY invoice", () => {
     const state = availablePaymentAction(input({ chainInvoiceStatus: "PENDING" }));
 
-    expect(state.headline).toBe("APPROVED");
-    expect(state.status).toBe("Approved · ready to execute");
+    // Authorized is not executed, and the words have to keep that apart.
+    expect(state.headline).toBe("AUTHORIZED · READY");
+    expect(state.status).toBe("Authorized · ready to execute");
     expect(state.action).toBe("EXECUTE_PAYMENT");
     expect(state.label).toBe("Execute payment");
     expect(state.settled).toBe(false);
@@ -167,12 +223,14 @@ describe("an unsettled invoice", () => {
     expect(state.detail).toContain("No payment has been submitted yet");
   });
 
-  it("reports HUMAN APPROVAL REQUIRED above the autonomous limit", () => {
+  it("reports AWAITING APPROVAL above the autonomous limit", () => {
     const state = availablePaymentAction(
       input({ autonomy: NEEDS_HUMAN, amountCents: 3_000_000, chainInvoiceStatus: "PENDING" }),
     );
 
-    expect(state.headline).toBe("HUMAN APPROVAL REQUIRED");
+    // Awaiting a person, not refused by one. Nothing has failed.
+    expect(state.headline).toBe("AWAITING APPROVAL");
+    expect(state.headline.toLowerCase()).not.toContain("reject");
     // The checks DID pass; what failed is the agent's authority to act alone.
     expect(state.lead).toBe("Policy checks passed");
     expect(state.action).toBe("APPROVE");
@@ -180,7 +238,7 @@ describe("an unsettled invoice", () => {
     expect(state.settled).toBe(false);
   });
 
-  it("reports REJECTED with no action for a rejection that never paid", () => {
+  it("reports PAYMENT REJECTED with no action for a rejection that never paid", () => {
     const suiRefused = decideAutonomy({
       action: "AUTO_PAY",
       finalOutcome: "SUI_REJECT",
@@ -193,7 +251,7 @@ describe("an unsettled invoice", () => {
       input({ autonomy: suiRefused, amountCents: 800_000, chainInvoiceStatus: "PENDING" }),
     );
 
-    expect(state.headline).toBe("REJECTED");
+    expect(state.headline).toBe("PAYMENT REJECTED");
     expect(state.settled).toBe(false);
     expect(state.facts).toContain("No payment action available");
     expect(offersPaymentControl(state)).toBe(false);

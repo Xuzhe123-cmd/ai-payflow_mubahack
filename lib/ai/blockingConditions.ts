@@ -40,3 +40,32 @@ export function blockingConditions(analysis: Readonly<DeterministicAnalysis>): s
 
   return reasons;
 }
+
+/**
+ * Is the ONLY thing standing in the way that this invoice is already paid?
+ *
+ * The distinction requirement: a redirected wallet and a completed payment both
+ * block, and they are not remotely the same situation. The first is an attack;
+ * the second is success. Collapsing them made a settled invoice render as
+ * CRITICAL risk — the highest alarm the interface has, raised because a payment
+ * had gone through correctly.
+ *
+ * Nothing here relaxes the block. `blockingConditions` is untouched and still
+ * refuses the payment; this only lets a caller describe the refusal honestly.
+ */
+export function blockedOnlyBySettlement(
+  analysis: Readonly<DeterministicAnalysis>,
+): boolean {
+  const { supplierFacts: sup, validationFacts: val } = analysis;
+  if (!val.isDuplicate) return false;
+
+  // Every OTHER blocking rule, asked directly. If any fires, the invoice has a
+  // real problem and settlement is not the story.
+  const suspicious =
+    !sup.supplierFound ||
+    sup.registryStatus !== "APPROVED" ||
+    !sup.walletMatch ||
+    !val.currencyAllowed;
+
+  return !suspicious;
+}

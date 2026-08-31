@@ -112,7 +112,7 @@ export function InvoiceTable({
                   </Td>
 
                   <Td>
-                    <StatusBadge run={run} />
+                    <StatusBadge run={run} invoiceNumber={invoice.invoiceNumber} />
                   </Td>
 
                   <Td className="pr-5" align="right">

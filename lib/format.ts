@@ -104,6 +104,7 @@ export const RISK_EVIDENCE_LABEL: Record<string, string> = {
   SUPPLIER_NOT_APPROVED: "Supplier not approved",
   WALLET_MISMATCH: "Remit wallet does not match registry",
   DUPLICATE_INVOICE: "Duplicate invoice",
+  INVOICE_ALREADY_SETTLED: "Payment already settled",
   PO_NOT_FOUND: "Purchase order not found",
   PO_AMOUNT_MISMATCH: "Invoice exceeds purchase order",
   AMOUNT_ABOVE_SUPPLIER_HISTORY: "Amount above supplier history",

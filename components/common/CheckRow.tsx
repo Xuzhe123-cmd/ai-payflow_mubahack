@@ -5,11 +5,19 @@ import type { ReactNode } from "react";
  * One assertion, drawn the same way whether it came from invoice validation or
  * from the chain. `tone` shifts the tick colour so an on-chain check reads as
  * enforcement rather than as another opinion.
+ *
+ * THE THIRD STATE. `passed` alone cannot describe every finding: an invoice
+ * that has already been settled is neither a pass nor a fault. Drawn as a red
+ * ✕ it reads as an accusation against a payment that completed correctly, and
+ * that is how "✕ No duplicate detected / Already settled as payment
+ * chain_0x927e…" came to sit on screen. `tone="warn"` draws it as ⚠ and leaves
+ * the label uncoloured — a finding worth reading, not a failure.
  */
 export function CheckRow({
   passed,
   label,
   detail,
+  note,
   limit,
   actual,
   tone = "verify",
@@ -19,17 +27,22 @@ export function CheckRow({
   passed: boolean;
   label: ReactNode;
   detail?: ReactNode;
+  /** A smaller line under the detail: what follows from the finding. */
+  note?: ReactNode;
   limit?: string | null;
   actual?: string | null;
-  tone?: "verify" | "chain";
+  tone?: "verify" | "chain" | "warn";
   index?: number;
   animate?: boolean;
 }) {
-  const markClass = passed
-    ? tone === "chain"
-      ? "border-chain/30 bg-chain-soft text-chain"
-      : "border-pos/30 bg-pos-soft text-pos"
-    : "border-neg/30 bg-neg-soft text-neg";
+  const warn = tone === "warn";
+  const markClass = warn
+    ? "border-warn/35 bg-warn-soft text-warn"
+    : passed
+      ? tone === "chain"
+        ? "border-chain/30 bg-chain-soft text-chain"
+        : "border-pos/30 bg-pos-soft text-pos"
+      : "border-neg/30 bg-neg-soft text-neg";
 
   return (
     <li
@@ -46,7 +59,7 @@ export function CheckRow({
           markClass,
         )}
       >
-        {passed ? "✓" : "✕"}
+        {warn ? "⚠" : passed ? "✓" : "✕"}
       </span>
 
       <div className="min-w-0 flex-1">
@@ -54,7 +67,7 @@ export function CheckRow({
           <span
             className={cn(
               "text-[13.5px] font-medium leading-snug",
-              passed ? "text-ink" : "text-neg",
+              warn ? "text-warn" : passed ? "text-ink" : "text-neg",
             )}
           >
             {label}
@@ -77,6 +90,9 @@ export function CheckRow({
         </div>
         {detail ? (
           <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-faint">{detail}</p>
+        ) : null}
+        {note ? (
+          <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">{note}</p>
         ) : null}
       </div>
     </li>

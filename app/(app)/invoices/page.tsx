@@ -14,31 +14,38 @@ import {
   type InvoiceEntry,
 } from "@/components/hooks/usePayflowSelectors";
 
-type TabId = "all" | "review" | "scheduled" | "paid" | "rejected";
+/**
+ * The tabs, and which category fills each.
+ *
+ * THE BUG THIS PAGE HAD: the filter below used to switch on `entry.outcome` —
+ * the AI's verdict — and on `run.status`, the local session's own record. For
+ * an invoice settled on chain in an earlier session both are silent about the
+ * settlement, so a released $4,800 escrow fell through to the guard's refusal
+ * of a SECOND payment and was filed under "Rejected", while its own badge in
+ * the same row read "Payment released".
+ *
+ * That was a second status system. It is gone: `entry.category` comes from
+ * `describeInvoiceStatus`, the same call that produces the badge, with the same
+ * chain-first precedence as `availablePaymentAction`. This file no longer
+ * derives status at all — it only says which category belongs in which tab.
+ *
+ * "Held" is its own tab because an escrowed payment is neither paid nor
+ * refused: the treasury has parted with the money and the supplier does not
+ * have it, and there was previously nowhere honest to put it.
+ */
+type TabId = "all" | "review" | "scheduled" | "held" | "paid" | "rejected";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "all", label: "All" },
   { id: "review", label: "Needs review" },
   { id: "scheduled", label: "Scheduled" },
+  { id: "held", label: "Held in escrow" },
   { id: "paid", label: "Paid" },
   { id: "rejected", label: "Rejected" },
 ];
 
 function matches(entry: InvoiceEntry, tab: TabId): boolean {
-  if (tab === "all") return true;
-  if (tab === "paid") return entry.run?.status === "PAID";
-  if (entry.run?.status === "PAID") return false;
-
-  switch (tab) {
-    case "review":
-      return entry.outcome === "HUMAN_REVIEW";
-    case "scheduled":
-      return entry.outcome === "SCHEDULED" || entry.outcome === "EXECUTED";
-    case "rejected":
-      return entry.outcome === "REJECTED" || entry.outcome === "SUI_REJECT";
-    default:
-      return true;
-  }
+  return tab === "all" || entry.category === tab;
 }
 
 export default function InvoicesPage() {

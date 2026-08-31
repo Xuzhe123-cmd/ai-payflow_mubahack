@@ -105,7 +105,7 @@ export function PaymentTable({ entries }: { entries: InvoiceEntry[] }) {
                   </td>
 
                   <td className="px-3 py-3">
-                    <StatusBadge run={run} />
+                    <StatusBadge run={run} invoiceNumber={invoice.invoiceNumber} />
                   </td>
 
                   <td className="px-3 py-3">

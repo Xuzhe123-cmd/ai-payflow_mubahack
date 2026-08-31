@@ -9,9 +9,13 @@
  * condition has not been met — and the answer, that the money leaves the
  * treasury and then waits, needs room to be shown rather than a badge.
  *
- * Two invoices, identical in every respect the policy engine can see. The only
- * difference is what the delivery document says, and that difference decides
- * whether a supplier gets paid.
+ * EVERY INVOICE HERE COMES FROM THE CHAIN. This page used to name two of them
+ * in constants, with their amounts, suppliers, escrow ids and a hand-written
+ * sentence each. That made the demo pair special in the rendering rather than
+ * in the data: a third conditional invoice would not have appeared, and the two
+ * that did would have kept describing themselves from a fixture even after the
+ * chain moved on. Now the list is whatever carries a shipment condition, and
+ * the labels are derived from state.
  */
 
 import { useEffect, useState } from "react";
@@ -20,38 +24,16 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { Eyebrow } from "@/components/common/Badge";
 import { EscrowDemo, type EscrowDemoInvoice } from "@/components/escrow/EscrowDemo";
 import { FlowDiagram, ResponsibilityGrid } from "@/components/escrow/FlowDiagram";
+import { evaluateShipmentEvidence } from "@/lib/oracle/evidence";
+import { money } from "@/lib/escrow/present";
 import { SHIPMENT_ORACLE_LABEL, SHIPMENT_ORACLE_DETAIL } from "@/lib/oracle/shipment";
 import type { EscrowDemoState } from "@/lib/escrow/demoFlow";
-
-/** Both invoices are real objects on testnet, created by scripts/seedEscrowDemo.ts. */
-const INVOICE_C: EscrowDemoInvoice = {
-  label: "Demo A — shipment confirmed",
-  invoiceNumber: "INV-2026-3501",
-  amountCents: 480_000,
-  supplierName: "Northwind Components Ltd",
-  recipient: "0x7a1c9f4e2b8d6035ae91c4f7d2b60853f19ac4e7b2d8065193af7c2e4b8d6091",
-  objectId: "0x927e138efa55e1fa300522191d01ac72a8b8a4c183c37c230a646b1a63c6065a",
-  claim:
-    "Approved supplier, matching wallet, inside the agent's $5,000 cap, liquidity comfortable. " +
-    "The delivery document reports DELIVERED, so the condition is met and the escrow releases.",
-};
-
-const INVOICE_D: EscrowDemoInvoice = {
-  label: "Demo B — shipment not confirmed",
-  invoiceNumber: "INV-2026-3502",
-  amountCents: 400_000,
-  supplierName: "Kestrel Logistics GmbH",
-  recipient: "0x3f8b2d6a91c7e405b8d29a4f7c61e308b5d29a4f7c61e308b5d29a4f7c61e308",
-  objectId: "0x7a617b9c89938e79092b07fb2f8aada17fd5669dc96e970099464b2979b061dd",
-  claim:
-    "Identical in every respect the policy engine can see — and the delivery document reports " +
-    "IN_TRANSIT. The payment is authorised, committed, and still does not reach the supplier.",
-};
 
 /** One invoice's state as /api/escrow/state reports it. */
 interface LiveDemo {
   invoiceNumber: string;
   amountCents: number;
+  supplierName: string;
   recipient: string;
   stage: EscrowDemoState["stage"];
   escrow: { objectId: string; attestationId: string | null } | null;
@@ -59,8 +41,13 @@ interface LiveDemo {
   proof: EscrowDemoState["proof"];
 }
 
+interface ConditionalInvoice {
+  invoice: EscrowDemoInvoice;
+  state: EscrowDemoState;
+}
+
 export default function EscrowDemoPage() {
-  const [live, setLive] = useState<Record<string, EscrowDemoState> | null>(null);
+  const [invoices, setInvoices] = useState<ConditionalInvoice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Read the chain once on mount. The page reports what the escrows say; it
@@ -76,21 +63,7 @@ export default function EscrowDemoPage() {
           setError(payload.message ?? "Live escrow state is unavailable.");
           return;
         }
-        const byInvoice: Record<string, EscrowDemoState> = {};
-        for (const demo of payload.demos as LiveDemo[]) {
-          byInvoice[demo.invoiceNumber] = {
-            invoiceNumber: demo.invoiceNumber,
-            amountCents: demo.amountCents,
-            stage: demo.stage,
-            recipient: demo.recipient,
-            proof: demo.proof,
-            attestation: demo.attestation,
-            escrowObjectId: demo.escrow?.objectId ?? null,
-            attestationObjectId: demo.escrow?.attestationId ?? null,
-            transactions: [],
-          };
-        }
-        setLive(byInvoice);
+        setInvoices((payload.demos as LiveDemo[]).map(describe));
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : "Live escrow state is unavailable.");
@@ -112,8 +85,8 @@ export default function EscrowDemoPage() {
         <p className="mt-2 max-w-[68ch] text-[13.5px] leading-relaxed text-ink-soft">
           An invoice can pass every check a treasury can make — approved supplier, registered
           wallet, inside the agent&rsquo;s limits, liquidity fine — and still not be due, because
-          something in the world has not happened yet. These two invoices differ in exactly one
-          thing: what their delivery document says.
+          something in the world has not happened yet. These invoices differ in exactly one
+          thing: what their delivery document says, and whether the oracle confirmed it.
         </p>
       </header>
 
@@ -126,15 +99,33 @@ export default function EscrowDemoPage() {
 
       {error ? (
         <div className="mb-5 rounded-xl border border-warn/35 bg-warn-soft px-5 py-3 text-[12.5px] text-ink-soft">
-          Live escrow state could not be read: {error}. The panels below show the
-          last state this page resolved, which may be behind the chain.
+          Live escrow state could not be read: {error}. Nothing is shown below rather than a
+          state assembled from fixtures, which would not be the chain&rsquo;s.
         </div>
       ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5">
-          <EscrowDemo invoice={INVOICE_C} live={live?.[INVOICE_C.invoiceNumber] ?? null} />
-          <EscrowDemo invoice={INVOICE_D} live={live?.[INVOICE_D.invoiceNumber] ?? null} />
+          {invoices === null && !error ? (
+            <div className="rounded-xl border border-hairline bg-surface-sunken px-5 py-4 text-[13px] text-ink-faint">
+              Reading escrow state from chain…
+            </div>
+          ) : null}
+
+          {invoices?.length === 0 ? (
+            <div className="rounded-xl border border-hairline bg-surface-sunken px-5 py-4 text-[13px] text-ink-soft">
+              No invoice currently carries a shipment condition. This page lists whatever does —
+              it names no invoice of its own.
+            </div>
+          ) : null}
+
+          {invoices?.map((entry) => (
+            <EscrowDemo
+              key={entry.invoice.invoiceNumber}
+              invoice={entry.invoice}
+              live={entry.state}
+            />
+          ))}
         </div>
 
         <div className="space-y-5">
@@ -144,4 +135,50 @@ export default function EscrowDemoPage() {
       </div>
     </PageContainer>
   );
+}
+
+/**
+ * The label and the claim, derived from what the chain holds.
+ *
+ * Written as a function of state rather than a table keyed by invoice number,
+ * so a conditional invoice created tomorrow describes itself correctly without
+ * anyone editing this file.
+ */
+function describe(demo: LiveDemo): ConditionalInvoice {
+  const evidence = evaluateShipmentEvidence({
+    invoiceNumber: demo.invoiceNumber,
+    proof: demo.proof,
+    attestation: demo.attestation,
+  });
+
+  const released = demo.stage === "RELEASED";
+  const status = demo.proof?.deliveryStatus ?? "no delivery document";
+
+  return {
+    invoice: {
+      label: evidence.confirmed ? "Shipment confirmed" : "Shipment not confirmed",
+      invoiceNumber: demo.invoiceNumber,
+      amountCents: demo.amountCents,
+      supplierName: demo.supplierName,
+      recipient: demo.recipient,
+      objectId: demo.escrow?.objectId ?? "",
+      claim: released
+        ? `The delivery document reports ${status} and the oracle attested it on chain, so the ` +
+          `escrow condition was satisfied and ${money(demo.amountCents)} reached the supplier.`
+        : `Approved supplier, matching wallet, inside the agent's limits — and the delivery ` +
+          `document reports ${status}. The payment is authorised, committed, and still does not ` +
+          `reach the supplier.`,
+    },
+    state: {
+      invoiceNumber: demo.invoiceNumber,
+      amountCents: demo.amountCents,
+      stage: demo.stage,
+      recipient: demo.recipient,
+      proof: demo.proof,
+      attestation: demo.attestation,
+      escrowObjectId: demo.escrow?.objectId ?? null,
+      attestationObjectId: demo.escrow?.attestationId ?? null,
+      transactions: [],
+    },
+  };
 }

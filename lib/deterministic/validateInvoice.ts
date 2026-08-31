@@ -46,6 +46,14 @@ export function validateInvoice(
     poAmountCents: po?.amountCents ?? null,
     poDeltaCents,
     poMatch: po ? poDeltaCents === 0 : null,
+    // The matched order's own fields, so a screen can show the record this
+    // comparison ran against rather than looking one up separately.
+    poCurrency: po?.currency ?? null,
+    poDescription: po?.description ?? null,
+    poIssuedAt: po?.issuedAt ?? null,
+    poSupplierId: po?.supplierId ?? null,
+    poSupplierMatch:
+      po && supplierFacts.supplierId ? po.supplierId === supplierFacts.supplierId : null,
     amountVsSupplierMeanRatio: ratio(history?.meanAmountCents),
     amountVsSupplierMaxRatio: ratio(history?.maxAmountCents),
     currencyAllowed: policy.allowedCurrencies.includes(invoiceFacts.currency),

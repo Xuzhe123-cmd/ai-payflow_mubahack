@@ -131,7 +131,7 @@ describe("an ordinary invoice", () => {
     // The correction. AUTO_PAY means the agent MAY settle this, not that it
     // has. Saying "executing" claimed a transaction that did not exist.
     const state = availablePaymentAction(input());
-    expect(state.status).toBe("Approved · ready to execute");
+    expect(state.status).toBe("Authorized · ready to execute");
     expect(state.action).toBe("EXECUTE_PAYMENT");
     expect(state.label).toBe("Execute payment");
     expect(offersPaymentControl(state)).toBe(true);
@@ -158,7 +158,7 @@ describe("an ordinary invoice", () => {
     const state = availablePaymentAction(input({ autonomy: NEEDS_HUMAN }));
     expect(state.action).toBe("APPROVE");
     expect(state.label).toBe("Approve payment");
-    expect(state.status).toBe("Human approval required");
+    expect(state.status).toBe("Awaiting approval");
     expect(offersPaymentControl(state)).toBe(true);
   });
 
@@ -200,7 +200,7 @@ describe("precedence is chain, then settlement, then recommendation", () => {
   it("only consults the recommendation when the chain is silent", () => {
     // No condition on this invoice at all — an ordinary payment.
     const state = availablePaymentAction(input({ conditionStage: null }));
-    expect(state.status).toBe("Approved · ready to execute");
+    expect(state.status).toBe("Authorized · ready to execute");
   });
 
   it("offers no control in any settled or committed state", () => {
@@ -248,7 +248,7 @@ describe("above the autonomous limit, a person authorizes and then executes", ()
     );
     expect(state.action).toBe("APPROVE");
     expect(state.label).toBe("Approve payment");
-    expect(state.status).toBe("Human approval required");
+    expect(state.status).toBe("Awaiting approval");
     expect(state.detail).toMatch(/above the agent's autonomous threshold/i);
     // It must not offer to execute something nobody has authorized.
     expect(state.action).not.toBe("EXECUTE_PAYMENT");
@@ -269,7 +269,10 @@ describe("above the autonomous limit, a person authorizes and then executes", ()
         humanApproval: { outcome: "APPROVED" },
       }),
     );
-    expect(state.status).toBe("Approved by human · ready to execute");
+    // Authorized, not executed — the same state as the autonomous case, so
+    // the same words. WHO authorized it is carried by the lead.
+    expect(state.status).toBe("Authorized · ready to execute");
+    expect(state.lead).toBe("Approved by a person · policy checks passed");
     expect(state.action).toBe("EXECUTE_PAYMENT");
     expect(state.label).toBe("Execute payment");
   });

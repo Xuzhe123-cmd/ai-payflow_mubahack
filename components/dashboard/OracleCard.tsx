@@ -19,6 +19,9 @@ const STATE_TONE: Record<OracleSignalState, BadgeTone> = {
   VERIFIED: "positive",
   LIVE: "chain",
   MISMATCH: "negative",
+  // Already paid. A settled invoice is a good outcome, not a data fault, and it
+  // must never be coloured like one.
+  SETTLED: "positive",
   UNAVAILABLE: "warning",
   COUNT: "neutral",
 };
@@ -42,8 +45,16 @@ export function OracleCard({
           "Information the chain cannot know on its own — invoices, suppliers, and expected cash movements."
         }
         actions={
+          // Not "Verified on chain": this panel is about invoice and supplier
+          // facts, and beside a shipment-oracle section that word would be read
+          // as a delivery having been confirmed. Says what it actually did.
+          //
+          // "Discrepancy found" is reserved for a signal the chain re-derived
+          // and DISAGREED with. An invoice that is already settled is not one:
+          // it used to raise this badge, telling a reader the oracle data was
+          // wrong about an invoice that had in fact been paid correctly.
           <Badge tone={feed.allVerified ? "positive" : "negative"} dot>
-            {feed.allVerified ? "Verified on chain" : "Discrepancy found"}
+            {feed.allVerified ? "Cross-checked on chain" : "Discrepancy found"}
           </Badge>
         }
       />
@@ -63,9 +74,11 @@ export function OracleCard({
               </p>
               {/* Said plainly, per row, so no reader has to infer it. */}
               <p className="mt-1 text-[11px] uppercase tracking-[0.06em] text-ink-faint">
-                {signal.chainVerified
-                  ? "Re-derived on chain before settlement"
-                  : "Advisory — the chain does not verify this"}
+                {signal.state === "SETTLED"
+                  ? "Chain settlement state — not an oracle discrepancy"
+                  : signal.chainVerified
+                    ? "Re-derived on chain before settlement"
+                    : "Advisory — the chain does not verify this"}
               </p>
             </li>
           ))}

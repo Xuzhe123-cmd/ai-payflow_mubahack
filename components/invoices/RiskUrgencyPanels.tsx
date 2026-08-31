@@ -9,6 +9,17 @@ import {
   formatFullDate,
   formatMoneyRounded,
 } from "@/lib/format";
+import { useChainInvoice } from "@/components/hooks/useChainInvoice";
+import { useConditionState } from "@/components/hooks/useConditionState";
+import { evaluateShipmentEvidence } from "@/lib/oracle/evidence";
+import { isPaidOnChain } from "@/lib/payments/availableAction";
+import {
+  describeSettledRisk,
+  isSettlementEvidence,
+  type SettledRiskInput,
+} from "@/lib/payments/settledRisk";
+import { money } from "@/lib/escrow/present";
+import { cn } from "@/lib/utils";
 import type { DeterministicAnalysis, TreasuryDecision } from "@/lib/types";
 
 /**
@@ -17,15 +28,56 @@ import type { DeterministicAnalysis, TreasuryDecision } from "@/lib/types";
  * The observations are deterministic facts; the LEVEL is the model's judgement
  * of them. Both are shown, in that order, so a reader can disagree with the
  * conclusion while still trusting the evidence.
+ *
+ * CHAIN FIRST, as everywhere else. Re-analysing a settled invoice answers a
+ * question about a payment that does not exist — could we pay this now? no, it
+ * is already paid — and rendering that answer as the invoice's risk turned a
+ * completed payment into CRITICAL carrying a "Duplicate invoice" observation.
+ * A settled invoice gets an assessment of the transaction that happened.
  */
 export function RiskPanel({
   facts,
   decision,
+  invoiceNumber,
 }: {
   facts: DeterministicAnalysis;
   decision: TreasuryDecision;
+  /** Enables the chain lookup. Without it the panel describes the local run. */
+  invoiceNumber?: string;
 }) {
-  const evidence = facts.riskEvidence;
+  const { invoice: chainInvoice, resolved: chainResolved } = useChainInvoice(
+    invoiceNumber ?? "",
+  );
+  const { condition, resolved: conditionResolved } = useConditionState(invoiceNumber ?? "");
+
+  const settled =
+    Boolean(invoiceNumber) &&
+    chainResolved &&
+    conditionResolved &&
+    (condition?.stage === "RELEASED" || isPaidOnChain(chainInvoice?.status ?? null));
+
+  if (settled) {
+    return (
+      <SettledRiskPanel
+        conditionStage={condition?.stage ?? null}
+        oracleConfirmed={
+          condition
+            ? evaluateShipmentEvidence({
+                invoiceNumber: condition.invoiceNumber,
+                proof: condition.proof,
+                attestation: condition.attestation,
+              }).confirmed
+            : false
+        }
+        chainInvoiceStatus={chainInvoice?.status ?? null}
+        amountLabel={money(condition?.amountCents ?? chainInvoice?.amountCents ?? 0)}
+      />
+    );
+  }
+
+  // Settlement facts are not anomalies, so they never appear under "flagged".
+  // The completed payment is described by the settled panel instead.
+  const evidence = facts.riskEvidence.filter((item) => !isSettlementEvidence(item.code));
 
   return (
     <Panel>
@@ -74,6 +126,70 @@ export function RiskPanel({
         </div>
 
         <ConfidenceBar confidence={decision.confidence} />
+      </PanelBody>
+    </Panel>
+  );
+}
+
+/**
+ * The risk panel for an invoice that has already been paid.
+ *
+ * Reports the completed transaction: what the chain established, in the order
+ * it happened. There is deliberately no risk LEVEL — a level answers "how
+ * dangerous would this payment be", and the payment is no longer a prospect.
+ */
+function SettledRiskPanel({
+  conditionStage,
+  oracleConfirmed,
+  chainInvoiceStatus,
+  amountLabel,
+}: {
+  conditionStage: SettledRiskInput["conditionStage"];
+  oracleConfirmed: boolean;
+  chainInvoiceStatus: string | null;
+  amountLabel: string;
+}) {
+  const view = describeSettledRisk({
+    conditionStage,
+    oracleConfirmed,
+    chainInvoiceStatus,
+    amountLabel,
+  });
+
+  return (
+    <Panel tone="positive">
+      <PanelHeader eyebrow="Payment status" title="What happened to this payment" />
+      <PanelBody className="space-y-4">
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-[15px] leading-none text-pos">✓</span>
+          <span className="text-[17px] font-semibold uppercase tracking-[-0.01em] text-pos">
+            {view.headline}
+          </span>
+        </div>
+
+        <p className="text-[13px] leading-relaxed text-ink-soft">{view.assessment}</p>
+
+        <div>
+          <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+            Evidence
+          </div>
+          <ul className="space-y-1.5">
+            {view.checks.map((check) => (
+              <li key={check.label} className="flex items-baseline gap-2 text-[12.5px]">
+                <span className={cn("shrink-0", check.ok ? "text-pos" : "text-ink-faint")}>
+                  {check.ok ? "✓" : "·"}
+                </span>
+                <span className={check.ok ? "text-ink-soft" : "text-ink-faint"}>
+                  {check.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <p className="border-t border-hairline pt-3 text-[12px] leading-relaxed text-ink-faint">
+          {view.note}
+        </p>
       </PanelBody>
     </Panel>
   );

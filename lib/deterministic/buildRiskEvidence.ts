@@ -57,13 +57,26 @@ export function buildRiskEvidence(
     });
   }
 
+  // AN ALREADY-PAID INVOICE IS NOT A DUPLICATE INVOICE.
+  //
+  // `validation.isDuplicate` means "a payment record exists for this invoice
+  // number" — that is, THIS invoice has been paid. Reported as
+  // DUPLICATE_INVOICE it rendered as "Duplicate invoice: Invoice number
+  // INV-2026-3501 has already been settled", which accuses the original
+  // invoice of being a duplicate of itself.
+  //
+  // A duplicate invoice is a SECOND document improperly repeating a first. We
+  // have no evidence of one here, and inventing the accusation from a
+  // settlement fact is exactly the conflation being removed. The observation
+  // stays — a settled invoice cannot be paid again and the reader must know
+  // that — but it is a settlement fact, and it says so.
   if (validation.isDuplicate) {
     evidence.push({
-      code: "DUPLICATE_INVOICE",
-      observation: `Invoice number ${invoice.invoiceNumber} has already been settled.`,
+      code: "INVOICE_ALREADY_SETTLED",
+      observation: `Invoice ${invoice.invoiceNumber} was already settled on chain.`,
       evidence: {
         invoiceNumber: invoice.invoiceNumber,
-        duplicateOfPaymentId: validation.duplicateOfPaymentId,
+        settledByPaymentId: validation.duplicateOfPaymentId,
       },
     });
   }

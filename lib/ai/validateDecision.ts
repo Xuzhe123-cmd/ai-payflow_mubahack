@@ -31,7 +31,7 @@ import type {
   TreasuryDecision,
 } from "../types";
 import { LEVELS, MIN_CONFIDENCE, TREASURY_ACTIONS } from "./decisionSchema";
-import { blockingConditions } from "./blockingConditions";
+import { blockedOnlyBySettlement, blockingConditions } from "./blockingConditions";
 
 const MAX_REASON_LENGTH = 300;
 const MAX_EXPLANATION_LENGTH = 1200;
@@ -95,8 +95,19 @@ function escalation(
  * The model's own action is preserved in `from`, because what it recommended
  * for a redirected wallet is exactly the thing worth showing on screen — the
  * guard overruling it is the demonstration, not an embarrassment to hide.
+ *
+ * `settlementOnly` separates the two quite different reasons a payment is
+ * refused. A redirected remit wallet is an attack and deserves CRITICAL. An
+ * invoice that has already been paid is a SUCCESS, and raising the interface's
+ * loudest alarm over it reported a completed payment as a crisis. The refusal
+ * is identical either way — no second payment is recommended — and only the
+ * severity and the wording differ.
  */
-function refuse(reasons: string[], outcome: ValidationOutcome): ValidationOutcome {
+function refuse(
+  reasons: string[],
+  outcome: ValidationOutcome,
+  settlementOnly: boolean,
+): ValidationOutcome {
   const detail = reasons.join(" ");
   const decision = outcome.decision;
   return {
@@ -104,12 +115,17 @@ function refuse(reasons: string[], outcome: ValidationOutcome): ValidationOutcom
       ...decision,
       action: "REJECT",
       recommendedDate: null,
-      risk: "CRITICAL",
+      risk: settlementOnly ? "LOW" : "CRITICAL",
       reasons: reasons.slice(0, MAX_REASONS),
-      riskExplanation: detail,
-      decisionExplanation:
-        `Refused by the decision guard: this invoice fails a deterministic safety check, ` +
-        `which no recommendation can override. ${detail}`.trim(),
+      riskExplanation: settlementOnly
+        ? `${detail} Nothing about the invoice is suspicious — a further payment would simply ` +
+          "be a duplicate of one that already completed."
+        : detail,
+      decisionExplanation: settlementOnly
+        ? "This invoice is already settled. No new payment is recommended, and the completed " +
+          "payment is unaffected."
+        : (`Refused by the decision guard: this invoice fails a deterministic safety check, ` +
+           `which no recommendation can override. ${detail}`).trim(),
     },
     violations: [
       ...outcome.violations,
@@ -131,7 +147,9 @@ export function validateDecision(
   // Applied to every path, including malformed output: an invoice that must not
   // be paid must not become payable because the model failed to parse either.
   const blocking = blockingConditions(analysis);
-  return blocking.length > 0 ? refuse(blocking, outcome) : outcome;
+  return blocking.length > 0
+    ? refuse(blocking, outcome, blockedOnlyBySettlement(analysis))
+    : outcome;
 }
 
 function validateStructure(

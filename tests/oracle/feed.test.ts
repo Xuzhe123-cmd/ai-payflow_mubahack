@@ -154,12 +154,36 @@ describe("per-invoice feeds reflect what the chain found", () => {
     expect(supplier.value).toBe("not in registry");
   });
 
-  it("reports an already-settled invoice as unpayable", async () => {
+  it("reports an already-settled invoice as settled, NOT as a discrepancy", async () => {
+    // THE BUG: a correctly-paid invoice raised "Discrepancy found" on the
+    // Real-World Facts panel, because "already settled" was reported as a
+    // MISMATCH. It is not one. The oracle's data and the chain agree
+    // completely: the document says what it says, and the payment happened.
+    // A discrepancy is a fact the chain re-derived and DISAGREED with.
     const feed = buildInvoiceOracleFeed(await analyse("s6_duplicate"));
     const invoice = feed.signals.find((s) => s.label === "Invoice data")!;
 
-    expect(invoice.state).toBe("MISMATCH");
-    expect(invoice.value).toBe("already settled");
+    expect(invoice.state).toBe("SETTLED");
+    expect(invoice.state).not.toBe("MISMATCH");
+    expect(invoice.value).toBe("settled on chain");
+    // The badge over the panel reads off this flag.
+    expect(feed.allVerified).toBe(true);
+  });
+
+  it("still fails the feed for a genuine discrepancy on a settled invoice", async () => {
+    // Settled must not become a blanket amnesty: a redirected wallet is still
+    // a discrepancy whatever the invoice's settlement state.
+    const duplicate = await analyse("s6_duplicate");
+    const feed = buildInvoiceOracleFeed({
+      ...duplicate,
+      analysis: {
+        ...duplicate.analysis,
+        supplierFacts: { ...duplicate.analysis.supplierFacts, walletMatch: false },
+      },
+    });
+
+    expect(feed.signals.find((s) => s.label === "Invoice data")!.state).toBe("SETTLED");
+    expect(feed.signals.find((s) => s.label === "Recipient wallet")!.state).toBe("MISMATCH");
     expect(feed.allVerified).toBe(false);
   });
 });

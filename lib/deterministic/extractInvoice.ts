@@ -9,7 +9,14 @@
  * extractor (Phase 8, Walrus PDFs) drops in without touching anything else.
  */
 
-import type { Cents, DiscountFacts, InvoiceFacts, IsoDate, RawInvoiceDocument } from "../types";
+import type {
+  Cents,
+  DiscountFacts,
+  InvoiceFacts,
+  InvoiceLineItem,
+  IsoDate,
+  RawInvoiceDocument,
+} from "../types";
 import { daysBetween, isIsoDate } from "../util/date";
 import { percentOf } from "../util/money";
 
@@ -60,6 +67,41 @@ function readDiscount(text: string, amountCents: Cents, asOf: IsoDate): Discount
   };
 }
 
+/**
+ * The billed lines, from the itemised block.
+ *
+ * The block runs from the `Description ... Amount` header to the rule above
+ * the total, and each line is a description followed by a money amount in the
+ * right-hand column. Anything that does not parse as such a line is skipped
+ * rather than guessed at — a wrong line item is worse than a missing one,
+ * because this is the evidence a reader uses to judge a PO overage.
+ *
+ * Deliberately does NOT fall back to the total. An invoice with no itemised
+ * section has no line items, and inventing one from the total would present a
+ * derived figure as something the document stated.
+ */
+function readLineItems(text: string): InvoiceLineItem[] {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => /^\s*Description\s+Amount\s*$/i.test(line));
+  if (start === -1) return [];
+
+  const items: InvoiceLineItem[] = [];
+  for (const line of lines.slice(start + 1)) {
+    // The rule, the total, or a blank line ends the block.
+    if (/^\s*-{3,}\s*$/.test(line)) break;
+    if (/^\s*Total Due/i.test(line)) break;
+    if (line.trim().length === 0) break;
+
+    const match = /^\s*(.+?)\s{2,}(-?[\d,]+\.\d{2})\s*$/.exec(line);
+    if (!match) continue;
+    const amountCents = parseMoneyText(match[2]);
+    if (amountCents === null) continue;
+    items.push({ description: match[1].trim(), amountCents });
+  }
+
+  return items;
+}
+
 /** The supplier name is the document's first non-empty line, by convention. */
 function readSupplierName(text: string): string | null {
   const first = text.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
@@ -104,6 +146,11 @@ export const TEXT_EXTRACTOR: DocumentExtractor = {
     const discount = total ? readDiscount(doc.text, amountCents, asOf) : null;
     if (discount) extractionConfidence.discount = 1;
 
+    const lineItems = readLineItems(doc.text);
+    // Not an unresolved FIELD: plenty of invoices carry no itemised block, and
+    // reporting its absence as a failed extraction would misdescribe them.
+    if (lineItems.length > 0) extractionConfidence.lineItems = 1;
+
     return {
       invoiceNumber: invoiceNumber ?? "",
       supplierName: supplierName ?? "",
@@ -117,6 +164,7 @@ export const TEXT_EXTRACTOR: DocumentExtractor = {
       discount,
       extractionConfidence,
       unresolvedFields,
+      lineItems,
     };
   },
 };

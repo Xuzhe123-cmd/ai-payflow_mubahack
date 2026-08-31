@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { shortAddress } from "@/lib/services/authService";
 import { usePayflow } from "@/components/providers/PayflowProvider";
+import { useInvoiceStats } from "@/components/hooks/usePayflowSelectors";
 
 const PRIMARY_NAV = [
   { href: "/dashboard", label: "Overview", icon: Analytics01Icon },
@@ -47,10 +48,10 @@ export function Sidebar() {
     return !run || run.status === "DETECTED" || run.status === "ANALYZING";
   }).length;
 
-  const reviewCount = state.invoices.filter((invoice) => {
-    const outcome = state.runs[invoice.id]?.analysis?.finalOutcome;
-    return outcome === "HUMAN_REVIEW" || outcome === "SUI_REJECT";
-  }).length;
+  // Counted through the shared chain-first rule rather than off `finalOutcome`.
+  // A settled invoice makes the guard refuse a SECOND payment, and counting
+  // that refusal here put a completed payment in the "needs review" badge.
+  const reviewCount = useInvoiceStats().needsReview;
 
   return (
     <aside

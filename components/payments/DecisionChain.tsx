@@ -15,7 +15,10 @@ import { usePayflow } from "@/components/providers/PayflowProvider";
 import { AutonomousBadge, HumanApproval, SIGNER_NOTE } from "@/components/payments/HumanApproval";
 import { useConditionState, type ConditionState } from "@/components/hooks/useConditionState";
 import { useChainInvoice } from "@/components/hooks/useChainInvoice";
+import { evaluateShipmentEvidence } from "@/lib/oracle/evidence";
+import { money } from "@/lib/escrow/present";
 import { decideAutonomy } from "@/lib/payments/autonomy";
+import { describeRecommendation } from "@/lib/payments/invoiceStatus";
 import {
   availablePaymentAction,
   type PaymentActionState,
@@ -103,32 +106,55 @@ function RecommendationBlock({ entry }: { entry: InvoiceEntry }) {
   const alreadySettled =
     chainInvoice?.status === "PAID" || condition?.stage === "RELEASED";
 
+  // Same verdict, different history, different words. "Payment rejected" on a
+  // settled invoice reads as though the original payment failed.
+  //
+  // `attemptedDuplicate` is deliberately NOT passed. Nothing on this page
+  // initiates a second payment — a settled invoice offers no control at all —
+  // so no second attempt has been made, and claiming one prevented would
+  // describe an event that never happened. A surface that does submit a repeat
+  // payment passes the flag; this one has nothing to report.
+  const wording = describeRecommendation({
+    action: decision.action,
+    settled: alreadySettled,
+    defaultLabel: ACTION_LABEL[decision.action],
+  });
+
   const amount =
     analysis.paymentRequest?.amountCents ?? facts.invoiceFacts.amountCents;
 
   return (
     <div className="rounded-xl border border-ai-border bg-ai-soft p-4">
-      <Eyebrow className="text-ai">AI recommendation</Eyebrow>
+      <Eyebrow className="text-ai">AI / Decision</Eyebrow>
 
       <div className="mt-2.5 flex items-baseline gap-2">
-        <span className="text-[17px] leading-none text-ai">
-          {ACTION_MARK[decision.action]}
+        {/* On a settled invoice the mark comes from the SETTLEMENT, not from
+            the action. "✕" beside "Payment already settled" would put a cross
+            against a payment that succeeded. */}
+        <span
+          className={cn(
+            "text-[17px] leading-none",
+            alreadySettled ? "text-pos" : "text-ai",
+          )}
+        >
+          {alreadySettled ? "✓" : ACTION_MARK[decision.action]}
         </span>
         <span className="text-[17px] font-semibold leading-tight tracking-[-0.01em] text-ink">
-          {ACTION_LABEL[decision.action]}
+          {wording.label}
         </span>
       </div>
 
-      {alreadySettled ? (
+      {wording.note ? (
         <div className="mt-3 rounded-lg border border-hairline bg-surface px-2.5 py-2">
-          <div className="text-[11.5px] font-medium text-ink">
-            This refers to a NEW payment
-          </div>
-          <div className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
-            {facts.invoiceFacts.invoiceNumber} is already settled on chain, so the deterministic
-            guard refuses any attempt to pay it again. No recommendation can override a settled
-            state, and the original payment did not fail — see the outcome.
-          </div>
+          <div className="text-[11px] leading-relaxed text-ink-soft">{wording.note}</div>
+          {/* SECONDARY, and it stays secondary. The guard refusing a further
+              payment is an explanation of why no control is offered — never the
+              headline, which would read as the payment having been stopped. */}
+          {wording.guardNote ? (
+            <div className="mt-1.5 border-t border-hairline pt-1.5 text-[11px] leading-relaxed text-ink-faint">
+              {wording.guardNote}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -177,6 +203,25 @@ function RecommendationBlock({ entry }: { entry: InvoiceEntry }) {
 function SafetyBlock({ entry }: { entry: InvoiceEntry }) {
   const analysis = entry.run!.analysis!;
   const { enforcement, paymentRequest } = analysis;
+  const invoiceNumber = analysis.analysis.invoiceFacts.invoiceNumber;
+
+  // What the chain currently holds against this invoice. Cached at module
+  // scope, so asking here costs nothing the outcome box has not already paid.
+  const { condition } = useConditionState(invoiceNumber);
+  const { invoice: chainInvoice } = useChainInvoice(invoiceNumber);
+
+  // A settled or committed invoice has chain state worth reporting, and
+  // "nothing was submitted" would be false about it — a transaction did run,
+  // in an earlier session or from the escrow flow.
+  const settled = condition?.stage === "RELEASED" || chainInvoice?.status === "PAID";
+  const committed =
+    condition !== null && ["ESCROWED", "PROOF_SUBMITTED", "HELD", "ATTESTED"].includes(
+      condition.stage,
+    );
+
+  if (settled || committed) {
+    return <ChainStateBlock condition={condition} settled={settled} chainInvoice={chainInvoice} />;
+  }
 
   if (!paymentRequest || !enforcement) {
     return (
@@ -592,6 +637,131 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
  * component decides nothing. It has no button by construction: a settled or
  * escrowed invoice has nothing for anyone to press.
  */
+/**
+ * What the chain holds against this invoice, where the safety check would be.
+ *
+ * The middle box answers "what does Sui say". For an invoice with no payment
+ * request that used to mean "nothing was submitted" — true of THIS session and
+ * false of the invoice, which may have settled through the escrow flow or in an
+ * earlier run. Reporting the escrow instead keeps the three boxes telling one
+ * continuous story: what was recommended, what the chain holds, what happened.
+ *
+ * Every line is read from chain-derived state. Nothing here is inferred from
+ * the recommendation.
+ */
+function ChainStateBlock({
+  condition,
+  settled,
+  chainInvoice,
+}: {
+  condition: ConditionState | null;
+  settled: boolean;
+  chainInvoice: { status: string; amountCents: number } | null;
+}) {
+  const evidence = condition
+    ? evaluateShipmentEvidence({
+        invoiceNumber: condition.invoiceNumber,
+        proof: condition.proof,
+        attestation: condition.attestation,
+      })
+    : null;
+
+  const amountCents = condition?.amountCents ?? chainInvoice?.amountCents ?? 0;
+  const facts: { label: string; ok: boolean }[] = [];
+
+  if (condition) {
+    facts.push({
+      label: settled ? "Escrow condition satisfied" : "Escrow condition not yet satisfied",
+      ok: settled,
+    });
+    facts.push({
+      label: evidence?.confirmed ? "Shipment confirmed" : "Shipment not confirmed",
+      ok: evidence?.confirmed === true,
+    });
+    facts.push({
+      label:
+        evidence?.confirmed === true
+          ? "Oracle attestation confirmed"
+          : condition.attestation
+            ? "Oracle attestation does not confirm this document"
+            : "No oracle attestation on chain",
+      ok: evidence?.confirmed === true,
+    });
+  }
+
+  if (chainInvoice) {
+    facts.push({
+      label: `Invoice recorded as ${chainInvoice.status} on chain`,
+      ok: settled,
+    });
+  }
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border p-4",
+        settled ? "border-pos/35 bg-pos-soft" : "border-warn/35 bg-warn-soft",
+      )}
+    >
+      <Eyebrow className={settled ? "text-pos" : "text-warn"}>Sui / chain state</Eyebrow>
+
+      <div className="mt-2.5 flex items-baseline gap-2">
+        <span className={cn("text-[15px] leading-none", settled ? "text-pos" : "text-warn")}>
+          {settled ? "✓" : "⚠"}
+        </span>
+        <span
+          className={cn(
+            "text-[17px] font-semibold tracking-[-0.01em]",
+            settled ? "text-pos" : "text-warn",
+          )}
+        >
+          {settled
+            ? condition
+              ? "Payment released"
+              : "Payment settled"
+            : "Payment held in escrow"}
+        </span>
+      </div>
+
+      <div
+        className={cn(
+          "tabular mt-1 text-[19px] font-semibold tracking-[-0.015em]",
+          settled ? "text-pos" : "text-warn",
+        )}
+      >
+        {money(amountCents)}
+      </div>
+
+      <ul
+        className={cn(
+          "mt-3 space-y-1.5 border-t pt-3",
+          settled ? "border-pos/20" : "border-warn/20",
+        )}
+      >
+        {facts.map((fact) => (
+          <li key={fact.label} className="flex gap-2 text-[12.5px] leading-relaxed text-ink-soft">
+            <span className={cn("shrink-0", fact.ok ? "text-pos" : "text-warn")}>
+              {fact.ok ? "✓" : "·"}
+            </span>
+            {fact.label}
+          </li>
+        ))}
+      </ul>
+
+      {condition?.escrow ? (
+        <a
+          href={condition.escrow.explorerUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-3 block truncate font-mono text-[10.5px] text-chain underline"
+        >
+          {condition.escrow.objectId}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 function ChainOutcome({
   action,
   condition,
