@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { usePayflow } from "@/components/providers/PayflowProvider";
 import { Wordmark } from "@/components/layout/Sidebar";
 import { cn } from "@/lib/utils";
+import {
+  AuthError,
+  beginSignIn,
+  fetchAuthConfig,
+  type AuthConfigStatus,
+} from "@/lib/services/authService";
 
 /**
  * Sign-in.
@@ -14,25 +20,67 @@ import { cn } from "@/lib/utils";
  * without the operator ever seeing a seed phrase. That is the reason this
  * screen looks like a finance product and not like a wallet — the wallet is
  * an implementation detail the treasury team should never have to think about.
+ *
+ * WHAT SIGNING IN DOES NOT DO, and the screen says so: it proves who the human
+ * is. It does not make them a member of a company, and it grants no authority
+ * over any treasury. Those are read from chain afterwards and may be absent.
+ *
+ * FOUR STATES, none of them a permanent spinner:
+ *   checking      asking the server whether zkLogin is configured
+ *   ready         the button works
+ *   unconfigured  it does not, and here is exactly which variable is missing
+ *   error         the attempt failed, with a retry
  */
 export default function LoginPage() {
   const router = useRouter();
-  const { state, signIn } = usePayflow();
+  const { state } = usePayflow();
+  const [config, setConfig] = useState<AuthConfigStatus | null>(null);
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (state.hydrated && state.session) router.replace("/dashboard");
   }, [router, state.hydrated, state.session]);
 
-  const onSignIn = async () => {
+  // Fetch only. `config` already starts null, so the first run needs no reset,
+  // and the retry button does its own before calling this.
+  const loadConfig = useCallback(() => {
+    void fetchAuthConfig()
+      .then(setConfig)
+      // A server that cannot answer is reported, never retried silently into a
+      // spinner that never stops.
+      .catch(() =>
+        setConfig({
+          ready: false,
+          missing: [
+            {
+              variable: "server",
+              detail: "The sign-in configuration endpoint could not be reached.",
+            },
+          ],
+        }),
+      );
+  }, []);
+
+  useEffect(loadConfig, [loadConfig]);
+
+  const onSignIn = () => {
+    if (!config?.ready) return;
     setPending(true);
+    setError(null);
     try {
-      await signIn();
-      router.push("/dashboard");
-    } finally {
+      // Leaves the app entirely. The session materialises in /auth/callback.
+      window.location.href = beginSignIn(config);
+    } catch (cause) {
       setPending(false);
+      setError(
+        cause instanceof AuthError ? cause.message : "Sign-in could not be started.",
+      );
     }
   };
+
+  const ready = config?.ready === true;
+  const checking = config === null;
 
   return (
     <main className="relative grid min-h-dvh place-items-center overflow-hidden bg-background px-6">
@@ -64,8 +112,8 @@ export default function LoginPage() {
         <div className="mt-9 rounded-2xl border border-hairline bg-surface p-6 shadow-[0_2px_14px_rgba(16,20,32,0.05)]">
           <button
             type="button"
-            onClick={() => void onSignIn()}
-            disabled={pending}
+            onClick={onSignIn}
+            disabled={!ready || pending}
             className={cn(
               "flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-hairline",
               "bg-surface text-[14px] font-medium text-ink transition-all",
@@ -73,10 +121,15 @@ export default function LoginPage() {
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}
           >
-            {pending ? (
+            {checking ? (
               <>
                 <span className="size-4 animate-spin rounded-full border-2 border-ai/25 border-t-ai" />
-                Creating treasury session…
+                Checking sign-in configuration…
+              </>
+            ) : pending ? (
+              <>
+                <span className="size-4 animate-spin rounded-full border-2 border-ai/25 border-t-ai" />
+                Redirecting to Google…
               </>
             ) : (
               <>
@@ -86,9 +139,50 @@ export default function LoginPage() {
             )}
           </button>
 
+          {config && !config.ready ? (
+            <div className="mt-3.5 rounded-xl border border-warn/30 bg-warn-soft px-3.5 py-3">
+              <div className="text-[12.5px] font-medium text-warn">
+                Sign-in is not configured
+              </div>
+              <ul className="mt-1.5 space-y-1">
+                {config.missing.map((item) => (
+                  <li key={item.variable} className="text-[11.5px] leading-relaxed text-ink-soft">
+                    <span className="font-mono text-[11px] text-ink">{item.variable}</span>
+                    {" — "}
+                    {item.detail}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfig(null);
+                  setError(null);
+                  loadConfig();
+                }}
+                className="mt-2.5 text-[11.5px] font-medium text-ai underline"
+              >
+                Check again
+              </button>
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="mt-3.5 rounded-xl border border-neg/30 bg-neg-soft px-3.5 py-3">
+              <div className="text-[12.5px] font-medium text-neg">Unable to start sign-in</div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">{error}</p>
+            </div>
+          ) : null}
+
           <p className="mt-3.5 text-center text-[12px] leading-relaxed text-ink-faint">
-            Secured by zkLogin. Your Google account derives a Sui address —
+            Secure login with zkLogin. Your Google account derives a Sui address —
             no seed phrase, no browser extension.
+          </p>
+
+          {/* Said before signing in, not discovered afterwards. */}
+          <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-faint">
+            Signing in proves your identity. Access to a company treasury is granted
+            separately, on chain.
           </p>
         </div>
 

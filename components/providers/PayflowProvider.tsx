@@ -44,7 +44,13 @@ import {
   type ExecutionReceipt,
   type ExecutionStageId,
 } from "@/lib/services/suiService";
-import { signInWithGoogle, type TreasurySession } from "@/lib/services/authService";
+import {
+  restoreIdentity,
+  sessionFromIdentity,
+  signOutIdentity,
+  type TreasurySession,
+} from "@/lib/services/authService";
+import type { AuthenticatedIdentity } from "@/lib/identity/authorization";
 import { AS_OF_DATE } from "@/lib/services/treasuryService";
 import { decideAutonomy, shouldActAutonomously } from "@/lib/payments/autonomy";
 
@@ -300,7 +306,8 @@ function reducer(state: PayflowState, action: Action): PayflowState {
 export interface PayflowContextValue {
   state: PayflowState;
   asOfDate: string;
-  signIn: () => Promise<void>;
+  /** Records an identity the callback established. Sign-in is a redirect. */
+  adoptIdentity: (identity: AuthenticatedIdentity) => void;
   signOut: () => void;
   connectInbox: () => Promise<void>;
   analyzeAll: () => Promise<void>;
@@ -395,19 +402,38 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
   const factor = SPEED_FACTOR[state.speed];
 
   // ---- auth --------------------------------------------------------------
-  const signIn = useCallback(async () => {
-    const session = await signInWithGoogle();
-    dispatch({ type: "SIGN_IN", session });
-    log(
-      activityEvent(
-        "SYSTEM",
-        "Treasury session opened",
-        `zkLogin session for ${session.companyName} · ${session.address.slice(0, 10)}…`,
-        null,
-        "positive",
-      ),
-    );
-  }, [log]);
+  //
+  // Sign-in no longer happens here. It is a redirect out to Google and back
+  // into /auth/callback, so this only records the identity the callback
+  // established. A session asserts WHO signed in and deliberately not which
+  // company they belong to — that is the chain's to answer, and
+  // `useAuthorization` asks it.
+  const adoptIdentity = useCallback(
+    (identity: AuthenticatedIdentity) => {
+      const session = sessionFromIdentity(identity);
+      dispatch({ type: "SIGN_IN", session });
+      log(
+        activityEvent(
+          "SYSTEM",
+          "Identity verified",
+          `zkLogin derived ${session.address.slice(0, 10)}… from a verified Google credential.`,
+          null,
+          "positive",
+        ),
+      );
+    },
+    [log],
+  );
+
+  // A refresh should not force a new sign-in. The identity is restored from
+  // this tab; the AUTHORIZATION is not, and is re-read from chain every time.
+  useEffect(() => {
+    if (state.session) return;
+    const identity = restoreIdentity();
+    if (identity) dispatch({ type: "SIGN_IN", session: sessionFromIdentity(identity) });
+    // Runs once on mount; a later sign-out must not immediately re-restore.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const signOut = useCallback(() => {
     try {
@@ -415,6 +441,9 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
     } catch {
       // Nothing to clean up.
     }
+    // Drops the stored identity and any half-finished sign-in attempt, so a
+    // sign-out cannot leave a pending nonce behind for the next one.
+    signOutIdentity();
     dispatch({ type: "SIGN_OUT" });
   }, []);
 
@@ -796,7 +825,7 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
     () => ({
       state,
       asOfDate: AS_OF_DATE,
-      signIn,
+      adoptIdentity,
       signOut,
       connectInbox,
       analyzeAll,
@@ -811,7 +840,7 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
     }),
     [
       state,
-      signIn,
+      adoptIdentity,
       signOut,
       connectInbox,
       analyzeAll,

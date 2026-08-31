@@ -9,6 +9,8 @@ import {
   useOnChainPolicy,
 } from "@/components/settings/PolicyPanels";
 import { usePayflow, type DemoSpeed } from "@/components/providers/PayflowProvider";
+import { useCurrentAuthorization } from "@/components/hooks/useAuthorization";
+import { ROLE_LABEL } from "@/lib/identity/permissions";
 import { shortAddress } from "@/lib/services/authService";
 
 const SPEEDS: { id: DemoSpeed; label: string; hint: string }[] = [
@@ -21,6 +23,8 @@ export default function SettingsPage() {
   const policy = useOnChainPolicy();
   const { state, setSpeed } = usePayflow();
   const session = state.session;
+  // Company and role are chain-derived, never taken from the session.
+  const { state: authorization } = useCurrentAuthorization();
 
   return (
     <PageContainer>
@@ -75,7 +79,24 @@ export default function SettingsPage() {
           <Panel>
             <PanelHeader eyebrow="Session" title="Signed-in identity" />
             <PanelBody className="space-y-4">
-              <Field label="Company" value={session?.companyName ?? "—"} />
+              {/* Company and role are chain-derived. The session knows who
+                  signed in; only the chain knows what they are. */}
+              <Field
+                label="Company"
+                value={
+                  authorization?.kind === "AUTHORIZED"
+                    ? authorization.membership.companyName
+                    : "No on-chain membership"
+                }
+              />
+              <Field
+                label="Role"
+                value={
+                  authorization?.kind === "AUTHORIZED"
+                    ? ROLE_LABEL[authorization.membership.role]
+                    : "—"
+                }
+              />
               <Field label="Operator" value={session?.operatorEmail ?? "—"} />
               <Field
                 label="Sui address"

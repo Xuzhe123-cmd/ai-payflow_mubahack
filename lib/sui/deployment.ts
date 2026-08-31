@@ -152,6 +152,19 @@ export interface EscrowDemoRecord {
   attestationIds: string[];
 }
 
+/** The on-chain company identity, once `identity::create_company` has run. */
+export interface IdentityRecord {
+  /** The shared `payflow::identity::Company` object. */
+  companyId: string;
+  /** Owned by whoever administers membership. */
+  companyAdminCapId: string;
+  companyName: string;
+  /** The treasury the company is bound to. */
+  treasuryId: string;
+  createdAt: string;
+  digest: string;
+}
+
 export interface DeploymentManifest {
   network: SuiNetwork;
   /**
@@ -178,6 +191,14 @@ export interface DeploymentManifest {
   upgrade?: UpgradeRecord;
   /** Absent until the escrow demo objects have been created. */
   escrowDemo?: EscrowDemoRecord;
+  /**
+   * Absent until the company identity has been created on chain.
+   *
+   * Its absence is meaningful and must not be papered over: with no company
+   * object there is no membership to read, and every authenticated user is
+   * correctly reported as having no authorization.
+   */
+  identity?: IdentityRecord;
   /** Real settlements already executed, kept as evidence rather than re-run. */
   proofs?: { a0?: PaymentProof };
   /**

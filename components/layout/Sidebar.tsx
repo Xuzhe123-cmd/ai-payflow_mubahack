@@ -13,6 +13,7 @@ import {
   Robot01Icon,
   Settings02Icon,
   Shield01Icon,
+  UserIcon,
   Time04Icon,
   Wallet02Icon,
 } from "@hugeicons/core-free-icons";
@@ -20,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { shortAddress } from "@/lib/services/authService";
 import { usePayflow } from "@/components/providers/PayflowProvider";
+import { useCurrentAuthorization } from "@/components/hooks/useAuthorization";
 import { useInvoiceStats } from "@/components/hooks/usePayflowSelectors";
 
 const PRIMARY_NAV = [
@@ -34,6 +36,7 @@ const PRIMARY_NAV = [
 
 const SECONDARY_NAV = [
   { href: "/agent", label: "AI Agent", icon: Robot01Icon },
+  { href: "/access", label: "On-chain access", icon: UserIcon },
   { href: "/security", label: "Security", icon: Shield01Icon },
   { href: "/settings", label: "Settings", icon: Settings02Icon },
 ];
@@ -41,6 +44,8 @@ const SECONDARY_NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   const { state, signOut } = usePayflow();
+  // The company name comes from the on-chain membership record.
+  const { state: authorization } = useCurrentAuthorization();
   const session = state.session;
 
   const pendingCount = state.invoices.filter((invoice) => {
@@ -100,8 +105,13 @@ export function Sidebar() {
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-ink-faint">
             Company
           </div>
+          {/* Read from the on-chain company record, never from the session.
+              A signed-in user with no membership sees "—", which is the
+              truthful answer rather than a company they do not belong to. */}
           <div className="mt-1 truncate text-[13px] font-medium text-ink">
-            {session?.companyName ?? "—"}
+            {authorization?.kind === "AUTHORIZED"
+              ? authorization.membership.companyName
+              : "—"}
           </div>
           {session ? (
             <div className="mt-1.5 flex items-center gap-1.5">
