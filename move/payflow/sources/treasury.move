@@ -29,6 +29,12 @@ const EApproverAlreadyAuthorized: u64 = 111;
 const EApproverNotAuthorized: u64 = 112;
 const EExpiryInPast: u64 = 113;
 const EWrongCompany: u64 = 114;
+/// The treasury is in HUMAN_ONLY mode and this path is not a human path.
+const ECircuitBreakerActive: u64 = 115;
+/// The breaker has not been installed on this treasury yet.
+const EBreakerNotReady: u64 = 116;
+/// Recovery attempted without a live, membership-verified human authorization.
+const ENoHumanRecovery: u64 = 117;
 
 const MS_PER_DAY: u64 = 86_400_000;
 
@@ -136,6 +142,44 @@ public struct ApproverAuthorization has store {
 /// where `approval::limits_for` can reach it with the `&Treasury` it already
 /// receives.
 public struct ApproversKey has copy, drop, store {}
+
+/// Key for the circuit breaker, held as a dynamic field for the same reason
+/// `ApproversKey` is: `Treasury<T>` is published and cannot gain a field.
+public struct CircuitBreakerKey has copy, drop, store {}
+
+/// Treasury operating mode. NORMAL is the everyday state; HUMAN_ONLY withdraws
+/// autonomy without withdrawing the treasury's ability to pay.
+const MODE_NORMAL: u8 = 0;
+const MODE_HUMAN_ONLY: u8 = 1;
+
+public fun mode_normal(): u8 { MODE_NORMAL }
+public fun mode_human_only(): u8 { MODE_HUMAN_ONLY }
+
+/// The on-chain consequence of an off-chain judgement.
+///
+/// THE SCORE IS EVIDENCE, NOT AUTHORITY. `anomaly_score` and `reason_code` are
+/// recorded so an operator can see WHY the treasury was frozen, and Move never
+/// reads them back to decide anything — the only field with force is `mode`.
+/// An attacker who could write a score here would gain nothing; an attacker who
+/// could write `mode` would need the owner capability, which is the actual
+/// boundary.
+///
+/// WHY MODE AND NOT A PAUSE. HUMAN_ONLY does not stop the treasury. It removes
+/// the AGENT's authority and leaves every human path exactly as it was, so the
+/// business keeps running through people while the automation is contained.
+public struct CircuitBreaker has store {
+    mode: u8,
+    /// 0..100, as computed off chain. Recorded as evidence.
+    anomaly_score: u8,
+    /// A short machine code naming the dominant signal. Evidence, not logic.
+    reason_code: String,
+    tripped_at_ms: u64,
+    /// Who tripped it. Always an address that held the owner cap.
+    tripped_by: address,
+    /// How many times this treasury has ever been frozen.
+    trip_count: u64,
+    reset_at_ms: u64,
+}
 
 public struct AgentAuthorization has store {
     max_single: u64,
@@ -579,11 +623,18 @@ public fun approver_allows_recipient<T>(
 /// callers want a verdict rather than a failure — `limits_for` in particular
 /// must be able to report a dead approval without killing the transaction that
 /// merely asked about it.
-public fun approver_can_authorize<T>(
+/// Whether the company and the treasury both still vouch for this person.
+///
+/// Everything `approver_can_authorize` checks EXCEPT the per-payment scope: the
+/// authorization exists, is enabled, has not expired, and the company's
+/// membership verdict is both positive and fresh.
+///
+/// Extracted so `reset_breaker` can require a human in good standing without
+/// inventing an amount and a recipient to satisfy a payment-shaped signature —
+/// with Atlas-only scoping in force, any invented recipient would have failed.
+public fun approver_in_good_standing<T>(
     treasury: &Treasury<T>,
     approver: address,
-    amount: u64,
-    recipient: address,
     now_ms: u64,
 ): bool {
     if (!df::exists(&treasury.id, approver)) return false;
@@ -600,6 +651,22 @@ public fun approver_can_authorize<T>(
     if (auth.membership_synced_at_ms == 0) return false;
     if (now_ms < auth.membership_synced_at_ms) return false;
     if (now_ms - auth.membership_synced_at_ms > MEMBERSHIP_SYNC_MAX_AGE_MS) return false;
+
+    true
+}
+
+public fun approver_can_authorize<T>(
+    treasury: &Treasury<T>,
+    approver: address,
+    amount: u64,
+    recipient: address,
+    now_ms: u64,
+): bool {
+    // Standing first, then the per-payment scope. Split so recovery can ask the
+    // first question without the second: un-freezing a treasury is not a
+    // payment, and has no amount or recipient to be scoped by.
+    if (!approver_in_good_standing(treasury, approver, now_ms)) return false;
+    let auth: &ApproverAuthorization = df::borrow(&treasury.id, approver);
 
     if (amount > auth.max_single) return false;
     if (!auth.allowed_recipients.is_empty() && !auth.allowed_recipients.contains(&recipient)) {
@@ -714,6 +781,161 @@ public(package) fun mark_invoice_paid<T>(
 public(package) fun record_payment<T>(treasury: &mut Treasury<T>, amount: u64) {
     treasury.total_paid = treasury.total_paid + amount;
     treasury.payment_count = treasury.payment_count + 1;
+}
+
+// --- Circuit breaker ---------------------------------------------------------
+//
+// The security consequence of an off-chain judgement, enforced here.
+//
+// WHAT LIVES OFF CHAIN. Gemini, Cloudflare, the behavioural statistics and the
+// anomaly score. None of it is in Move and none of it should be: a model's
+// opinion is not a fact a validator can check, and putting a score on chain
+// would only move the trust problem, not solve it.
+//
+// WHAT LIVES HERE. One byte of mode, and the refusal that follows from it. That
+// is the part an attacker cannot argue with, reach around, or re-render.
+
+/// Installs the breaker, ARMED.
+///
+/// Separate from `create` because the treasury is already published and cannot
+/// gain a field. Until this runs, `breaker_ready` is false and the payment
+/// paths behave exactly as they did before this phase — see
+/// `assert_autonomy_allowed` for why absence permits rather than refuses.
+public fun init_breaker<T>(treasury: &mut Treasury<T>, cap: &TreasuryOwnerCap, ctx: &TxContext) {
+    assert_owner(treasury, cap);
+    if (!df::exists(&treasury.id, CircuitBreakerKey {})) {
+        df::add(
+            &mut treasury.id,
+            CircuitBreakerKey {},
+            CircuitBreaker {
+                mode: MODE_NORMAL,
+                anomaly_score: 0,
+                reason_code: b"".to_string(),
+                tripped_at_ms: 0,
+                tripped_by: ctx.sender(),
+                trip_count: 0,
+                reset_at_ms: 0,
+            },
+        );
+    };
+}
+
+/// Whether the breaker has been installed.
+public fun breaker_ready<T>(treasury: &Treasury<T>): bool {
+    df::exists(&treasury.id, CircuitBreakerKey {})
+}
+
+/// The current mode. NORMAL when the breaker is not installed.
+public fun breaker_mode<T>(treasury: &Treasury<T>): u8 {
+    if (!df::exists(&treasury.id, CircuitBreakerKey {})) return MODE_NORMAL;
+    let breaker: &CircuitBreaker = df::borrow(&treasury.id, CircuitBreakerKey {});
+    breaker.mode
+}
+
+public fun breaker_human_only<T>(treasury: &Treasury<T>): bool {
+    breaker_mode(treasury) == MODE_HUMAN_ONLY
+}
+
+public fun breaker_score<T>(treasury: &Treasury<T>): u8 {
+    if (!df::exists(&treasury.id, CircuitBreakerKey {})) return 0;
+    let breaker: &CircuitBreaker = df::borrow(&treasury.id, CircuitBreakerKey {});
+    breaker.anomaly_score
+}
+
+public fun breaker_reason<T>(treasury: &Treasury<T>): String {
+    if (!df::exists(&treasury.id, CircuitBreakerKey {})) return b"".to_string();
+    let breaker: &CircuitBreaker = df::borrow(&treasury.id, CircuitBreakerKey {});
+    breaker.reason_code
+}
+
+public fun breaker_tripped_at_ms<T>(treasury: &Treasury<T>): u64 {
+    if (!df::exists(&treasury.id, CircuitBreakerKey {})) return 0;
+    let breaker: &CircuitBreaker = df::borrow(&treasury.id, CircuitBreakerKey {});
+    breaker.tripped_at_ms
+}
+
+public fun breaker_trip_count<T>(treasury: &Treasury<T>): u64 {
+    if (!df::exists(&treasury.id, CircuitBreakerKey {})) return 0;
+    let breaker: &CircuitBreaker = df::borrow(&treasury.id, CircuitBreakerKey {});
+    breaker.trip_count
+}
+
+/// THE GATE. Every autonomous and conditional path calls this.
+///
+/// Fails CLOSED once installed and OPEN while absent, and the asymmetry is
+/// deliberate. Treating "not installed" as HUMAN_ONLY would mean the package
+/// upgrade itself froze the treasury before anyone armed anything — a change in
+/// behaviour nobody asked for, arriving at the moment least expected. Absence
+/// is only reachable before installation, because no function in this module
+/// removes the field.
+public fun assert_autonomy_allowed<T>(treasury: &Treasury<T>) {
+    assert!(breaker_mode(treasury) != MODE_HUMAN_ONLY, ECircuitBreakerActive);
+}
+
+/// Freezes autonomy.
+///
+/// REQUIRES THE OWNER CAPABILITY, and that is the answer to "can the anomaly
+/// engine trip this by itself": no. The engine produces a score and a reason,
+/// and a holder of the cap decides whether to act on them. Making the trip
+/// permissionless would hand every passer-by a treasury freeze; making it
+/// automatic would put a model's output directly in charge of the chain, which
+/// is the exact architecture this phase exists to avoid.
+///
+/// Idempotent, so a second trip while already frozen records the new evidence
+/// without pretending it is a new event.
+public fun trip_breaker<T>(
+    treasury: &mut Treasury<T>,
+    cap: &TreasuryOwnerCap,
+    anomaly_score: u8,
+    reason_code: String,
+    now_ms: u64,
+    ctx: &TxContext,
+) {
+    assert_owner(treasury, cap);
+    assert!(df::exists(&treasury.id, CircuitBreakerKey {}), EBreakerNotReady);
+
+    let sender = ctx.sender();
+    let breaker: &mut CircuitBreaker = df::borrow_mut(&mut treasury.id, CircuitBreakerKey {});
+    let already = breaker.mode == MODE_HUMAN_ONLY;
+
+    breaker.mode = MODE_HUMAN_ONLY;
+    breaker.anomaly_score = anomaly_score;
+    breaker.reason_code = reason_code;
+    breaker.tripped_at_ms = now_ms;
+    breaker.tripped_by = sender;
+    if (!already) {
+        breaker.trip_count = breaker.trip_count + 1;
+    };
+}
+
+/// Restores autonomy. STRICTLY HARDER THAN TRIPPING.
+///
+/// Takes the owner capability AND requires a named human who holds a live,
+/// membership-verified approver authorization on this treasury — the Phase 1
+/// record, with its enabled flag, its expiry, its company binding and its
+/// membership freshness all re-checked here through `approver_can_authorize`.
+///
+/// The asymmetry is the point. Restricting the treasury needs one signature;
+/// releasing it needs a signature AND a person the company still vouches for.
+/// An operator whose Chain-Doi membership has been revoked, whose authorization
+/// has expired, or whose membership reading has gone stale cannot un-freeze the
+/// treasury, and neither can any amount of AI output.
+public fun reset_breaker<T>(
+    treasury: &mut Treasury<T>,
+    cap: &TreasuryOwnerCap,
+    recovering_approver: address,
+    now_ms: u64,
+) {
+    assert_owner(treasury, cap);
+    assert!(df::exists(&treasury.id, CircuitBreakerKey {}), EBreakerNotReady);
+
+    // Read BEFORE the mutable borrow: the authorization is another dynamic
+    // field on the same UID, and borrowing the breaker first would lock it.
+    assert!(approver_in_good_standing(treasury, recovering_approver, now_ms), ENoHumanRecovery);
+
+    let breaker: &mut CircuitBreaker = df::borrow_mut(&mut treasury.id, CircuitBreakerKey {});
+    breaker.mode = MODE_NORMAL;
+    breaker.reset_at_ms = now_ms;
 }
 
 // --- Test support ------------------------------------------------------------

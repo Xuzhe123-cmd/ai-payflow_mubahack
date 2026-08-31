@@ -13,6 +13,7 @@ import { ACTION_LABEL, formatFullDate, formatMoney, formatMoneyRounded } from "@
 import { EXECUTION_STAGES } from "@/lib/services/suiService";
 import { usePayflow } from "@/components/providers/PayflowProvider";
 import { AutonomousBadge, HumanApproval, SIGNER_NOTE } from "@/components/payments/HumanApproval";
+import { AiProviders } from "@/components/payments/AiProviders";
 import { useConditionState, type ConditionState } from "@/components/hooks/useConditionState";
 import { useChainInvoice } from "@/components/hooks/useChainInvoice";
 import { evaluateShipmentEvidence } from "@/lib/oracle/evidence";
@@ -185,6 +186,11 @@ function RecommendationBlock({ entry }: { entry: InvoiceEntry }) {
           {decision.decisionExplanation}
         </p>
       </div>
+
+      {/* The two models behind the verdict above, for THIS invoice. Placed
+          inside the AI card so the evidence sits with the conclusion rather
+          than on a separate page the judge has to find. */}
+      <AiProviders invoiceNumber={facts.invoiceFacts.invoiceNumber} />
 
       {guard.downgraded ? (
         <div className="mt-3 rounded-lg border border-warn/30 bg-warn-soft px-2.5 py-2">

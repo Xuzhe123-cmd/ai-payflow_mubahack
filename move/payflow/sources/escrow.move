@@ -124,6 +124,11 @@ public fun execute_conditional<T>(
 ) {
     assert!(agent::treasury_id(cap) == object::id(treasury), EWrongTreasury);
 
+    // The conditional path is still an autonomous claim: the agent is choosing
+    // to commit treasury funds. HUMAN_ONLY withdraws that, while leaving
+    // `execute_conditional_approved` available to a person.
+    treasury::assert_autonomy_allowed(treasury);
+
     let lim = agent::limits_for(treasury, cap, clock);
     let ev = payment::evaluate(
         treasury,
@@ -295,6 +300,17 @@ public fun release<T>(
     assert!(escrow.status == STATUS_LOCKED, ENotLocked);
     assert!(escrow.treasury_id == object::id(treasury), EWrongTreasury);
     assert!(invoice::invoice_number(inv) == escrow.invoice_number, EAttestationMismatch);
+
+    // A RELEASE OF AGENT-LOCKED FUNDS IS STILL AUTONOMY, and it is the half
+    // that actually moves money. Freezing the lock while leaving the release
+    // open would stop new attacks and let every escrow the attacker already
+    // created pay out — the containment would arrive exactly too late.
+    //
+    // Escrows locked by a PERSON are unaffected: their authority is recorded on
+    // the escrow itself, and HUMAN_ONLY does not withdraw a human's.
+    if (escrow.authority == limits::authority_agent()) {
+        treasury::assert_autonomy_allowed(treasury);
+    };
 
     // The attestation must be about THIS treasury and THIS invoice. Without
     // both, a confirmation for some other shipment would open this escrow.

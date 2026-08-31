@@ -36,6 +36,7 @@ const PRIMARY_NAV = [
 
 const SECONDARY_NAV = [
   { href: "/agent", label: "AI Agent", icon: Robot01Icon },
+  { href: "/defense", label: "AI Defense", icon: Shield01Icon },
   { href: "/access", label: "On-chain access", icon: UserIcon },
   { href: "/security", label: "Security", icon: Shield01Icon },
   { href: "/settings", label: "Settings", icon: Settings02Icon },

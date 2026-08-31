@@ -249,6 +249,12 @@ public fun execute_payment<T>(
     assert!(invoice::treasury_id(inv) == object::id(treasury), EWrongTreasury);
     assert!(registry::treasury_id(reg) == object::id(treasury), EWrongTreasury);
 
+    // THE CIRCUIT BREAKER, checked before anything else is evaluated. This is
+    // the autonomous path — the agent acting on its own capability — and it is
+    // exactly what HUMAN_ONLY withdraws. `execute_approved` below is left
+    // untouched, so a person can still settle this same invoice while frozen.
+    treasury::assert_autonomy_allowed(treasury);
+
     let lim = agent::limits_for(treasury, cap, clock);
     let ev = evaluate(
         treasury,
