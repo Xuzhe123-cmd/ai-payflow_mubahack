@@ -55,15 +55,14 @@ export async function readBreakerState(
 ): Promise<BreakerState> {
   const entries = await queries.getDynamicFields(treasuryId);
 
-  // The key is a struct with no fields, so it is identified by its TYPE rather
-  // than by a name value — unlike the approver fields, which are keyed by
-  // address.
-  const entry = entries.find((row) => {
-    const name = row.name;
-    if (typeof name === "string") return name.includes("CircuitBreakerKey");
-    const type = (row as { type?: unknown }).type;
-    return typeof type === "string" && type.includes("CircuitBreakerKey");
-  });
+  // IDENTIFIED BY TYPE, NOT BY NAME. `CircuitBreakerKey {}` is an empty struct:
+  // its decoded name is an empty object carrying nothing to match on, unlike
+  // the approver fields, which are keyed by address. Matching on `name` found
+  // the field on no chain at all and silently reported NOT_INSTALLED for a
+  // breaker that existed.
+  const entry = entries.find(
+    (row) => typeof row.nameType === "string" && row.nameType.includes("CircuitBreakerKey"),
+  );
 
   if (!entry) {
     return {

@@ -72,11 +72,15 @@ export function BehavioralMonitor({ snapshot }: { snapshot: DefenseSnapshot | nu
       <PanelHeader
         eyebrow="Behaviour"
         title="Behavioral monitor"
-        subtitle="What the payment stream looks like. Per-payment checks cannot see any of this."
         actions={
           <Badge tone={tone} dot>
             {anomaly.exceedsThreshold ? "🚨 ANOMALY DETECTED" : anomaly.band}
           </Badge>
+        }
+        subtitle={
+          snapshot.simulating
+            ? "SIMULATED ATTACK STATE — a synthetic payment pattern, scored by the live engine."
+            : "What the payment stream looks like. Per-payment checks cannot see any of this."
         }
       />
       <PanelBody className="space-y-4">

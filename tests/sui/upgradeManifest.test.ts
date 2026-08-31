@@ -30,9 +30,16 @@ const ORIGINAL = "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67
  * so the value is updated when a real upgrade happens and never read from the
  * manifest it is meant to be checking.
  */
-const UPGRADED = "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690";
+const UPGRADED = "0x6d237a995924ad0529c0933a2d0eeca58fb2f3bebaa79bee46605960edbf21ed";
 /** The package v3 replaced, kept so the history stays followable. */
+/**
+ * Where the escrow and oracle TYPES were defined. Permanently v2: a type's
+ * origin never moves, however many times the package is upgraded.
+ */
 const PREVIOUS = "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578";
+
+/** What v4 replaced. Moves with every upgrade, unlike the origin above. */
+const REPLACED = "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690";
 
 const live = JSON.parse(
   readFileSync(resolve(process.cwd(), "deployments/testnet.json"), "utf8"),
@@ -74,13 +81,15 @@ describe("the deployed manifest is intact", () => {
     );
   });
 
-  it("records the identity upgrade to v3", () => {
+  it("records the circuit-breaker upgrade to v4", () => {
     expect(live.upgrade?.packageId).toBe(UPGRADED);
-    // v3 replaced v2, not the original — the manifest records the LATEST
-    // upgrade, and reading it as v1 would lose a version of the history.
-    expect(live.upgrade?.previousPackageId).toBe(PREVIOUS);
-    expect(live.upgrade?.version).toBe(3);
-    expect(live.upgrade?.addedModules).toEqual(["identity"]);
+    // v4 replaced v3, not the original — the manifest records the LATEST
+    // upgrade, and reading it as v1 would lose two versions of the history.
+    expect(live.upgrade?.previousPackageId).toBe(REPLACED);
+    expect(live.upgrade?.version).toBe(4);
+    // v4 added NO module: the breaker lives in the existing treasury module as
+    // a dynamic field, because a published struct cannot gain a field.
+    expect(live.upgrade?.addedModules).toEqual([]);
   });
 
   it("records the seeded escrow demo objects", () => {
@@ -173,8 +182,8 @@ describe("after an upgrade the two package ids mean different things", () => {
 
   it("records what the upgrade replaced, so the history is followable", () => {
     const manifest = upgraded();
-    expect(manifest.upgrade?.previousPackageId).toBe(PREVIOUS);
-    expect(manifest.upgrade?.version).toBe(3);
-    expect(manifest.upgrade?.addedModules).toEqual(["identity"]);
+    expect(manifest.upgrade?.previousPackageId).toBe(REPLACED);
+    expect(manifest.upgrade?.version).toBe(4);
+    expect(manifest.upgrade?.addedModules).toEqual([]);
   });
 });

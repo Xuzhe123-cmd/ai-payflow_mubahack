@@ -29,6 +29,17 @@ export interface DynamicFieldEntry {
   name: unknown;
   /** The stored value, already decoded. */
   value: unknown;
+  /**
+   * The key's Move type, as `0x…::module::Struct`.
+   *
+   * Needed because a key can be an EMPTY struct — `CircuitBreakerKey {}` has no
+   * fields, so `name` decodes to an empty object and carries nothing to match
+   * on. The type is the only thing that identifies such a field.
+   *
+   * Optional so the existing test fakes, which key by address and have no need
+   * of it, stay valid without being rewritten.
+   */
+  nameType?: string | null;
 }
 
 /** Everything the reader needs. Read-only, by construction. */
@@ -79,7 +90,10 @@ interface DynamicFieldPage {
   address: {
     dynamicFields: {
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
-      nodes: { name: { json: unknown } | null; value: { json?: unknown } | null }[];
+      nodes: {
+        name: { json: unknown; type?: { repr?: string } | null } | null;
+        value: { json?: unknown } | null;
+      }[];
     };
   } | null;
 }
@@ -145,7 +159,10 @@ export function createSuiQueries(network: SuiNetwork): ChainQueries {
         address(address: $id) {
           dynamicFields(first: ${PAGE_SIZE}, after: $after) {
             pageInfo { hasNextPage endCursor }
-            nodes { name { json } value { __typename ... on MoveValue { json } } }
+            nodes {
+              name { json type { repr } }
+              value { __typename ... on MoveValue { json } }
+            }
           }
         }
       }`;
@@ -161,7 +178,11 @@ export function createSuiQueries(network: SuiNetwork): ChainQueries {
         const page = data.address?.dynamicFields;
         if (!page) break;
         for (const node of page.nodes) {
-          entries.push({ name: node.name?.json ?? null, value: node.value?.json ?? null });
+          entries.push({
+            name: node.name?.json ?? null,
+            value: node.value?.json ?? null,
+            nameType: node.name?.type?.repr ?? null,
+          });
         }
         if (!page.pageInfo.hasNextPage || !page.pageInfo.endCursor) break;
         after = page.pageInfo.endCursor;

@@ -43,7 +43,7 @@ const V1 = "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d";
  */
 const V2_ORIGIN = "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578";
 /** The current live package, for CALLS. Bumped by each upgrade. */
-const V3_CALLS = "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690";
+const V4_CALLS = "0x6d237a995924ad0529c0933a2d0eeca58fb2f3bebaa79bee46605960edbf21ed";
 const TREASURY = "0x15f45303f80c591ea9777da30386c650df73a9277e478f43e128af123a57dd5a";
 const OWNER = "0xa09bfa3a1f78f168c2970cff756592b7376be0ac947d845aedc4c0781d270609";
 /** The capability the partial run really created. */
@@ -109,7 +109,7 @@ describe("types resolve to the package that defined the module", () => {
   });
 
   it("sends calls to v2", () => {
-    expect(callPackageId(live)).toBe(V3_CALLS);
+    expect(callPackageId(live)).toBe(V4_CALLS);
   });
 
   it("still agrees with the single-package helper before any upgrade", () => {

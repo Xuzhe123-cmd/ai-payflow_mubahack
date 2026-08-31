@@ -441,11 +441,16 @@ describe("the circuit-breaker simulation stays separate", () => {
   });
 
   it("says WOULD trip, and that nothing on chain changed", () => {
-    const breaker = code("components/defense/CircuitBreakerPanel.tsx");
-    expect(breaker).toContain("CIRCUIT BREAKER WOULD TRIP");
-    expect(breaker).toContain("The behavioral engine detected an anomalous payment pattern");
-    expect(breaker).toContain("Simulation only");
-    expect(breaker).toContain("no on-chain state was changed");
+    // The box now presents the finding and the action as two steps, so the
+    // wording moved — but the two claims it must make are unchanged: the
+    // breaker WOULD trip, and simulating has not altered treasury state.
+    const breaker = code("components/defense/CircuitBreakerPanel.tsx").replace(/\s+/g, " ");
+    expect(breaker).toContain("Anomaly threshold exceeded — requesting circuit breaker…");
+    expect(breaker).toContain(
+      "The behavioral engine requested the freeze. It cannot perform one",
+    );
+    expect(breaker).toContain("stays exactly as it is until Sui confirms");
+    expect(breaker).toContain("Demo Attack Simulation — no real AI model was compromised.");
   });
 
   it("still reads the real mode from Sui", () => {

@@ -32,7 +32,7 @@ const V1 = "0x8d520423e902a07edf2ab73d34d18efa5753d055f8ab46825b5fd7b4da67775d";
  */
 const V2_ORIGIN = "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578";
 /** The current live package, for CALLS. Bumped by each upgrade. */
-const V3_CALLS = "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690";
+const V4_CALLS = "0x6d237a995924ad0529c0933a2d0eeca58fb2f3bebaa79bee46605960edbf21ed";
 
 const manifest = JSON.parse(
   readFileSync(resolve(process.cwd(), "deployments/testnet.json"), "utf8"),
@@ -54,7 +54,7 @@ function lock() {
 
 describe("the three package ids stay apart", () => {
   it("sends every call to v2", () => {
-    expect(lock().packageId).toBe(V3_CALLS);
+    expect(lock().packageId).toBe(V4_CALLS);
     expect(
       attestCall({
         manifest,
@@ -67,7 +67,7 @@ describe("the three package ids stay apart", () => {
         validForMs: 86_400_000,
         aiAssessment: null,
       }).packageId,
-    ).toBe(V3_CALLS);
+    ).toBe(V4_CALLS);
     expect(
       releaseCall({
         manifest,
@@ -75,14 +75,14 @@ describe("the three package ids stay apart", () => {
         attestationObjectId: "0xatt",
         invoiceObjectId: INVOICE_C,
       }).packageId,
-    ).toBe(V3_CALLS);
+    ).toBe(V4_CALLS);
   });
 
   it("keeps the settlement coin type argument on v1", () => {
     // MOCK_USDC was defined by the original publish. The upgraded id would name
     // a type that does not exist.
     expect(lock().typeArguments).toEqual([`${V1}::mock_usdc::MOCK_USDC`]);
-    expect(lock().typeArguments[0]).not.toContain(V3_CALLS);
+    expect(lock().typeArguments[0]).not.toContain(V4_CALLS);
   });
 
   it("expects a v2 escrow and a v2 attestation to be created", () => {
@@ -253,7 +253,7 @@ describe("the demo proof documents", () => {
 describe("rendered commands are inspectable", () => {
   it("renders a lock as a runnable call", () => {
     const rendered = renderPlan(lock());
-    expect(rendered).toContain(`--package ${V3_CALLS}`);
+    expect(rendered).toContain(`--package ${V4_CALLS}`);
     expect(rendered).toContain("--module escrow");
     expect(rendered).toContain("--function execute_conditional");
     expect(rendered).toContain(`--type-args ${V1}::mock_usdc::MOCK_USDC`);

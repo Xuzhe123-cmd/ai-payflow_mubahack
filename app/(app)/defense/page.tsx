@@ -33,7 +33,6 @@ import { cn } from "@/lib/utils";
 
 export default function DefensePage() {
   const [snapshot, setSnapshot] = useState<DefenseSnapshot | null>(null);
-  const [simulating, setSimulating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   /**
@@ -46,6 +45,16 @@ export default function DefensePage() {
    */
   const [applied, setApplied] = useState<string | null>(null);
   /**
+   * Arms the automatic trip, and ONLY a click can set it.
+   *
+   * Deliberately not derived from `simulating` or from the anomaly score: a
+   * state-derived trigger would fire on a page load of `?simulate=attack`, on a
+   * refresh, or on any re-render that happened to see a high score — each of
+   * which would submit a real transaction nobody asked for. The token changes
+   * once per press, and the panel fires once per token.
+   */
+  const [tripToken, setTripToken] = useState(0);
+  /**
    * WHICH INVOICE IS UNDER ANALYSIS — from the URL, so the selection is
    * shareable, reloadable, and visible in the address bar during a demo. The
    * default applies only when the URL names none.
@@ -53,6 +62,30 @@ export default function DefensePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const invoice = searchParams.get("invoice")?.trim() || DEFAULT_INVOICE_NUMBER;
+
+  /**
+   * THE SIMULATION LIVES IN THE URL, not in React state.
+   *
+   * Held in state, it was lost on any re-mount — a re-render after the trip
+   * transaction, an invoice change, a reload — while the breaker it had just
+   * tripped stayed HUMAN_ONLY on chain. The screen then showed the real 6/100
+   * baseline beside a TRIPPED breaker, which reads as a contradiction rather
+   * than as the two different things they are.
+   *
+   * In the URL it survives all of those, and reloading WITHOUT the parameter
+   * correctly returns to the live baseline.
+   */
+  const simulating = searchParams.get("simulate") === "attack";
+
+  /** Rewrites the query while preserving whatever else is in it. */
+  function setParams(changes: Record<string, string | null>) {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === null) params.delete(key);
+      else params.set(key, value);
+    }
+    router.replace(`/defense?${params.toString()}`, { scroll: false });
+  }
 
   const key = `${simulating}:${attempt}`;
   const loading = applied !== key;
@@ -122,7 +155,14 @@ export default function DefensePage() {
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              onClick={() => setSimulating(true)}
+              onClick={() => {
+                setParams({ simulate: "attack" });
+                // Arms the auto-trip for THIS press. The token is what makes
+                // the trip a consequence of the click rather than of the URL —
+                // loading ?simulate=attack shows the simulation and submits
+                // nothing.
+                setTripToken((value) => value + 1);
+              }}
               disabled={simulating || loading}
               className={cn(
                 "h-9 rounded-lg bg-warn px-3.5 text-[13px] font-medium text-white",
@@ -134,7 +174,7 @@ export default function DefensePage() {
             {simulating ? (
               <button
                 type="button"
-                onClick={() => setSimulating(false)}
+                onClick={() => setParams({ simulate: null })}
                 disabled={loading}
                 className="h-9 rounded-lg border border-hairline bg-surface px-3.5 text-[13px] font-medium text-ink hover:bg-surface-sunken disabled:opacity-55"
               >
@@ -166,7 +206,21 @@ export default function DefensePage() {
           }}
         />
         <BehavioralMonitor snapshot={snapshot} />
-        <CircuitBreakerPanel snapshot={snapshot} onRefresh={() => setAttempt((value) => value + 1)} />
+        <CircuitBreakerPanel
+          snapshot={snapshot}
+          autoTripToken={tripToken}
+          onRefresh={() => setAttempt((value) => value + 1)}
+          onResetComplete={() => {
+            // The chain has confirmed NORMAL, so the simulated attack is over.
+            // Clearing it returns the monitor to the live baseline and
+            // re-enables the Simulate button for the next rehearsal.
+            //
+            // It also makes a re-trip impossible rather than merely guarded:
+            // with the simulation off, the anomaly falls below the threshold
+            // and `shouldAutoTrip` is false regardless of the token.
+            setParams({ simulate: null });
+          }}
+        />
       </div>
     </PageContainer>
   );

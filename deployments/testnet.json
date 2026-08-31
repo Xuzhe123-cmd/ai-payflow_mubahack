@@ -90,15 +90,13 @@
   },
   "upgradeCapId": "0x29976b1acd8bb91968ed2708cd99c4fb0e011d7defc1ee2a19a7b77218c5acda",
   "upgrade": {
-    "packageId": "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690",
-    "previousPackageId": "0x14ae68a6e19f0671c7b9d23db312b56bd003b36d77ce279802aaf9cf7d997578",
-    "version": 3,
+    "packageId": "0x6d237a995924ad0529c0933a2d0eeca58fb2f3bebaa79bee46605960edbf21ed",
+    "previousPackageId": "0x3a6940862c683e19b563ac889cbbe6cd843e42209d63c76f4e0631068666f690",
+    "version": 4,
     "upgradeCapId": "0x29976b1acd8bb91968ed2708cd99c4fb0e011d7defc1ee2a19a7b77218c5acda",
-    "upgradedAt": "2026-08-31T10:36:32.408Z",
-    "digest": "3FZAxX3gHw24St49aAu1RLDhEyQoJDi9fJBR6K1HqVbf",
-    "addedModules": [
-      "identity"
-    ]
+    "upgradedAt": "2026-08-31T17:41:18.075088Z",
+    "digest": "G7R8ZMLx77Bvp3bFpe7j3bkiDxkd9mpte9NZH9c4WBMm",
+    "addedModules": []
   },
   "proofs": {
     "a0": {
@@ -149,5 +147,10 @@
     "treasuryId": "0x15f45303f80c591ea9777da30386c650df73a9277e478f43e128af123a57dd5a",
     "createdAt": "2026-08-31T10:45:00.000Z",
     "digest": "59ye7mvMxnQhU58ETVN3vQk8ZdaFChB11Toi8gWbp74d"
+  },
+  "circuitBreaker": {
+    "fieldObjectId": "0xf4ba91b12c54f89756897daf390e59f3cd732d7877ff0c0e2417bd572a416452",
+    "initDigest": "FohQAHMKpw32FJmRufNcFJWDWPBKC3Wv9DdbVwfSpGQd",
+    "tripDigest": "3z3MKM3D96vmkt2T7W7DEXx6fXBjYErHP81esABt7syp"
   }
 }
