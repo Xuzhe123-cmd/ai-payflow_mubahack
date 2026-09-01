@@ -9,6 +9,11 @@
  *
  * Three states, in order: the ask, the confirmation, and the chain's answer.
  * Nothing here executes on its own — each step is a separate deliberate click.
+ *
+ * A FOURTH THING IT NOW SHOWS: an execution that was attempted and refused.
+ * That outcome always existed and was never rendered, so the button ticked
+ * through its stages and quietly reset — which reads as a broken button rather
+ * than as the treasury declining a payment.
  */
 
 "use client";
@@ -18,14 +23,36 @@ import { useState } from "react";
 import { Badge } from "@/components/common/Badge";
 import { CheckRow } from "@/components/common/CheckRow";
 import { Eyebrow } from "@/components/common/Badge";
+import { ExecutionFailureNotice } from "@/components/payments/ExecutionFailureNotice";
 import { usePayflow, type InvoiceRun } from "@/components/providers/PayflowProvider";
+import type { ExecutionMode } from "@/lib/services/suiService";
 import { formatMoneyRounded, shortWallet } from "@/lib/format";
 import type { AnalysisResponse } from "@/lib/services/contracts";
 import { cn } from "@/lib/utils";
 
-/** The one place the simulated signer is described. */
-export const SIGNER_NOTE =
-  "Execution in this build is simulated — the transaction is composed and the receipt is generated locally, not signed by a wallet or submitted to Sui.";
+/**
+ * The one place the signer is described — accurately, in either mode.
+ *
+ * It used to say execution was simulated and the receipt generated locally,
+ * which was true when nothing was submitted and became false the moment real
+ * execution was wired in. It also credited the zkLogin session with signing,
+ * which was never true: zkLogin establishes WHO is using the app and this build
+ * has no proving service, so it cannot produce a signature. The treasury's own
+ * server-held key signs.
+ */
+export function signerNote(mode: ExecutionMode): string {
+  if (!mode.live) {
+    return (
+      "Live execution is off on this server. Pressing execute asks Sui what it would decide and " +
+      "submits nothing — no transaction, no receipt, no funds moved."
+    );
+  }
+  return (
+    `Executing submits a real transaction to Sui ${mode.network ?? "testnet"}, signed by the ` +
+    "treasury's server-held key. zkLogin establishes who is signed in; it does not sign this " +
+    "payment. Any receipt shown is the digest the chain returned."
+  );
+}
 
 function Button({
   onClick,
@@ -75,7 +102,9 @@ export function HumanApproval({
   analysis: AnalysisResponse;
   run: InvoiceRun;
 }) {
-  const { approveInvoicePayment, rejectInvoicePayment, executeInvoicePayment } = usePayflow();
+  const { approveInvoicePayment, rejectInvoicePayment, executeInvoicePayment, state } =
+    usePayflow();
+  const signerLine = signerNote(state.executionMode);
   const [confirming, setConfirming] = useState(false);
   const [working, setWorking] = useState(false);
 
@@ -155,6 +184,15 @@ export function HumanApproval({
 
         {approved && run.status !== "PAID" && run.status !== "EXECUTING" ? (
           <div className="mt-3.5 border-t border-warn/20 pt-3">
+            {/* ABOVE the button, deliberately. The reason a payment did not go
+                through has to be read before the same button is pressed
+                again — underneath it, the retry is the nearer affordance and
+                the explanation is the thing scrolled past. */}
+            {run.executionFailure ? (
+              <div className="mb-3">
+                <ExecutionFailureNotice failure={run.executionFailure} />
+              </div>
+            ) : null}
             <Button
               variant="primary"
               disabled={working}
@@ -163,9 +201,13 @@ export function HumanApproval({
                 void executeInvoicePayment(invoiceId).finally(() => setWorking(false));
               }}
             >
-              {working ? "Submitting…" : "Execute payment"}
+              {working
+                ? "Submitting…"
+                : run.executionFailure
+                  ? "Try payment again"
+                  : "Execute payment"}
             </Button>
-            <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">{SIGNER_NOTE}</p>
+            <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">{signerLine}</p>
           </div>
         ) : null}
       </div>
@@ -211,7 +253,7 @@ export function HumanApproval({
             {working ? "Re-checking on chain…" : "Confirm & pay"}
           </Button>
         </div>
-        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">{SIGNER_NOTE}</p>
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">{signerLine}</p>
       </div>
     );
   }

@@ -40,9 +40,13 @@ import {
 import { listInvoices } from "@/lib/services/invoiceListService";
 import {
   executePayment as submitPayment,
+  readExecutionMode,
   EXECUTION_STAGES,
+  PaymentRefusedError,
+  type ExecutionMode,
   type ExecutionReceipt,
   type ExecutionStageId,
+  type PaymentAuthority,
 } from "@/lib/services/suiService";
 import {
   restoreIdentity,
@@ -68,10 +72,37 @@ export type InvoiceStatus =
   | "PAID"
   | "FAILED";
 
+/**
+ * A payment that was attempted and did not settle.
+ *
+ * KEPT SEPARATE FROM `error`, which means "the analysis failed" and is rendered
+ * only for a FAILED run. An execution failure leaves the run ANALYZED — the
+ * analysis is still good, the invoice is still payable — so it was stored in
+ * that same field and then never displayed by anything. The button ticked
+ * through five stages and reset itself with nothing said.
+ */
+export interface ExecutionFailure {
+  /** A stable identifier: a policy check, or why the server would not submit. */
+  code: string;
+  message: string;
+  /** The Move abort code, when Sui refused. */
+  abortCode: number | null;
+  /**
+   * A digest here means a REAL transaction was rejected on chain — it reached
+   * consensus and consumed gas. Its absence means nothing was ever submitted.
+   * The two are different facts and the interface says which.
+   */
+  digest: string | null;
+  explorerUrl: string | null;
+  at: string;
+}
+
 export interface InvoiceRun {
   status: InvoiceStatus;
   analysis: AnalysisResponse | null;
   error: string | null;
+  /** Why the last execution attempt did not settle. Cleared when one starts. */
+  executionFailure: ExecutionFailure | null;
   receipt: ExecutionReceipt | null;
   /** Pipeline steps already reported, for the live progress list. */
   completedSteps: PipelineStepName[];
@@ -115,12 +146,22 @@ export interface PayflowState {
   activeInvoiceId: string | null;
   activity: ActivityEvent[];
   speed: DemoSpeed;
+  /**
+   * Whether the server will actually submit, asked of the server on load.
+   *
+   * Held in state so the interface can describe execution accurately BEFORE
+   * anyone clicks. "The treasury key will sign this on testnet" and "nothing
+   * will be submitted" are different promises, and a build that guessed is how
+   * a simulated receipt came to be shown as a real settlement.
+   */
+  executionMode: ExecutionMode;
 }
 
 const EMPTY_RUN: InvoiceRun = {
   status: "DETECTED",
   analysis: null,
   error: null,
+  executionFailure: null,
   receipt: null,
   completedSteps: [],
   executionStage: null,
@@ -139,6 +180,9 @@ const INITIAL_STATE: PayflowState = {
   activeInvoiceId: null,
   activity: [],
   speed: "brisk",
+  // Assumed off until the server says otherwise: an unanswered question must
+  // not read as a promise to submit.
+  executionMode: { live: false, network: null },
 };
 
 // ---------------------------------------------------------------------------
@@ -157,6 +201,7 @@ type Action =
   | { type: "SET_ACTIVE"; invoiceId: string | null }
   | { type: "ACTIVITY"; events: ActivityEvent[] }
   | { type: "SET_SPEED"; speed: DemoSpeed }
+  | { type: "EXECUTION_MODE"; mode: ExecutionMode }
   | { type: "RESET" };
 
 let activitySeq = 0;
@@ -291,6 +336,9 @@ function reducer(state: PayflowState, action: Action): PayflowState {
     case "SET_SPEED":
       return { ...state, speed: action.speed };
 
+    case "EXECUTION_MODE":
+      return { ...state, executionMode: action.mode };
+
     case "RESET":
       return { ...INITIAL_STATE, hydrated: true, session: state.session, speed: state.speed };
 
@@ -390,6 +438,17 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
       // Storage being unavailable is not a demo-stopping problem.
     }
   }, [state]);
+
+  // ---- execution mode ----------------------------------------------------
+  // Asked once, on load. The answer changes only when the server restarts with
+  // a different configuration, and a restart ends this session anyway.
+  useEffect(() => {
+    const controller = new AbortController();
+    void readExecutionMode(controller.signal).then((mode) => {
+      dispatch({ type: "EXECUTION_MODE", mode });
+    });
+    return () => controller.abort();
+  }, []);
 
   const log = useCallback((event: ActivityEvent) => {
     dispatch({ type: "ACTIVITY", events: [event] });
@@ -763,49 +822,81 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
       // manual one must not pay twice — only an ANALYZED invoice is payable.
       if (run.status === "EXECUTING" || run.status === "PAID") return;
 
-      dispatch({ type: "RUN_PATCH", invoiceId, patch: { status: "EXECUTING" } });
+      // WHICH MOVE FUNCTION SETTLES THIS. An approval means the payment is
+      // above the agent's authority, so it goes through `execute_approved`
+      // against a scoped HumanApproval rather than through the AgentCap. The
+      // agent cannot reach that path and a human does not need the cap: the
+      // separation is structural, not a flag.
+      const authority: PaymentAuthority = run.approval ? "HUMAN_APPROVAL" : "AGENT";
+
+      dispatch({
+        type: "RUN_PATCH",
+        invoiceId,
+        // The previous failure goes at the START of the retry, not at its end.
+        // Leaving it up while the stages tick would attribute an old refusal to
+        // the attempt now running.
+        patch: { status: "EXECUTING", executionFailure: null },
+      });
 
       for (const stage of EXECUTION_STAGES) {
         dispatch({ type: "RUN_PATCH", invoiceId, patch: { executionStage: stage.id } });
         await wait(stage.durationMs * factor);
       }
 
-      // `submitPayment` REFUSES: on-chain execution is not wired up, and it
-      // will not invent a receipt. Marking the run PAID here is what reported a
-      // $30,000 settlement that never reached a validator, so the failure is
-      // recorded as a failure and the invoice stays unpaid.
+      // The only success path runs on a digest the CHAIN returned. Marking a
+      // run PAID on anything else is what reported a $30,000 settlement that
+      // never reached a validator, so a refusal is recorded as a refusal, the
+      // invoice stays unpaid, and the reason is put on screen.
       try {
-        const receipt = await submitPayment(request);
+        const receipt = await submitPayment(request, authority);
         dispatch({
           type: "RUN_PATCH",
           invoiceId,
-          patch: { status: "PAID", receipt, executionStage: null },
+          patch: { status: "PAID", receipt, executionStage: null, executionFailure: null },
         });
         log(
           activityEvent(
             "CHAIN",
             `Payment executed · ${request.invoiceNumber}`,
-            `${receipt.digest.slice(0, 18)}… · epoch ${receipt.epoch}`,
+            `${receipt.digest.slice(0, 18)}… · ${
+              receipt.checkpoint ? `checkpoint ${receipt.checkpoint}` : "awaiting checkpoint"
+            }`,
             invoiceId,
             "positive",
           ),
         );
       } catch (error) {
+        const refusal =
+          error instanceof PaymentRefusedError
+            ? error
+            : new PaymentRefusedError(
+                "EXECUTION_FAILED",
+                error instanceof Error ? error.message : "No payment was submitted.",
+              );
+
         dispatch({
           type: "RUN_PATCH",
           invoiceId,
           patch: {
+            // ANALYZED, not FAILED: the analysis is sound and the invoice is
+            // still payable. What failed is this attempt.
             status: "ANALYZED",
             executionStage: null,
-            error: error instanceof Error ? error.message : "No payment was submitted.",
+            executionFailure: {
+              code: refusal.code,
+              message: refusal.message,
+              abortCode: refusal.detail.abortCode,
+              digest: refusal.detail.digest,
+              explorerUrl: refusal.detail.explorerUrl,
+              at: new Date().toISOString(),
+            },
           },
         });
         log(
           activityEvent(
             "CHAIN",
             `No payment submitted · ${request.invoiceNumber}`,
-            "On-chain execution is not wired up in this build. Nothing was sent to Sui and the " +
-              "invoice remains unpaid.",
+            refusal.message,
             invoiceId,
             "negative",
           ),
