@@ -174,6 +174,7 @@ const EMPTY = {
   status: "ANALYZING" as const,
   analysis: null,
   error: null,
+  executionFailure: null,
   receipt: null,
   executionStage: null,
 };

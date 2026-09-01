@@ -17,6 +17,12 @@ import type { InvoiceEntry } from "@/components/hooks/usePayflowSelectors";
  * The transaction column is the honest one: it is empty unless a payment was
  * actually executed on chain. A scheduled payment has no digest, and the table
  * does not pretend otherwise.
+ *
+ * It now also reports an execution that was REFUSED. A row whose payment failed
+ * used to be indistinguishable from one nobody had tried yet — same empty
+ * transaction cell, same Execute button — which is exactly how a real refusal
+ * passed for a button that did nothing. A row has no space for the reason, so
+ * it names the refusal and sends the reader to the invoice for the rest.
  */
 export function PaymentTable({ entries }: { entries: InvoiceEntry[] }) {
   const { executeInvoicePayment } = usePayflow();
@@ -117,6 +123,16 @@ export function PaymentTable({ entries }: { entries: InvoiceEntry[] }) {
                       <Badge tone="chain" dot pulse>
                         submitting
                       </Badge>
+                    ) : run?.executionFailure ? (
+                      <Link
+                        href={`/invoices/${invoice.id}`}
+                        className="inline-block"
+                        title={run.executionFailure.message}
+                      >
+                        <Badge tone="negative" dot>
+                          not submitted
+                        </Badge>
+                      </Link>
                     ) : (
                       <span className="text-[13px] text-ink-faint">—</span>
                     )}
@@ -130,7 +146,7 @@ export function PaymentTable({ entries }: { entries: InvoiceEntry[] }) {
                         className="rounded-lg"
                         onClick={() => void executeInvoicePayment(invoice.id)}
                       >
-                        Execute
+                        {run?.executionFailure ? "Retry" : "Execute"}
                       </Button>
                     ) : null}
                   </td>

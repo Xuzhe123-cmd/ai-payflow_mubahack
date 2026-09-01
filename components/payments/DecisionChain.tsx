@@ -12,7 +12,8 @@ import { StageList } from "@/components/common/States";
 import { ACTION_LABEL, formatFullDate, formatMoney, formatMoneyRounded } from "@/lib/format";
 import { EXECUTION_STAGES } from "@/lib/services/suiService";
 import { usePayflow } from "@/components/providers/PayflowProvider";
-import { AutonomousBadge, HumanApproval, SIGNER_NOTE } from "@/components/payments/HumanApproval";
+import { AutonomousBadge, HumanApproval, signerNote } from "@/components/payments/HumanApproval";
+import { ExecutionFailureNotice } from "@/components/payments/ExecutionFailureNotice";
 import { AiProviders } from "@/components/payments/AiProviders";
 import { useConditionState, type ConditionState } from "@/components/hooks/useConditionState";
 import { useChainInvoice } from "@/components/hooks/useChainInvoice";
@@ -373,7 +374,7 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
   // Two separate acts, two separate controls. Approving records a human's
   // authorization and pays nothing; executing submits the payment. Both reuse
   // the existing provider actions rather than a second approval system.
-  const { executeInvoicePayment, approveInvoicePayment } = usePayflow();
+  const { executeInvoicePayment, approveInvoicePayment, state } = usePayflow();
   const run = entry.run!;
   const analysis = run.analysis!;
   const { enforcement, paymentRequest, decision } = analysis;
@@ -711,12 +712,22 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
         ) : null}
 
         {action.action === "EXECUTE_PAYMENT" ? (
-          <Button
-            className="mt-3 w-full rounded-lg"
-            onClick={() => void executeInvoicePayment(entry.invoice.id)}
-          >
-            {action.label}
-          </Button>
+          <>
+            {/* Read before the retry, not after it. A refusal rendered below
+                the button leaves the button as the nearer thing to press and
+                the explanation as the thing scrolled past. */}
+            {run.executionFailure ? (
+              <div className="mt-3">
+                <ExecutionFailureNotice failure={run.executionFailure} />
+              </div>
+            ) : null}
+            <Button
+              className="mt-3 w-full rounded-lg"
+              onClick={() => void executeInvoicePayment(entry.invoice.id)}
+            >
+              {run.executionFailure ? "Try payment again" : action.label}
+            </Button>
+          </>
         ) : null}
       </div>
       )}
@@ -747,7 +758,7 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
       ) : null}
 
       <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-faint">
-        {SIGNER_NOTE}
+        {signerNote(state.executionMode)}
       </p>
     </div>
   );
