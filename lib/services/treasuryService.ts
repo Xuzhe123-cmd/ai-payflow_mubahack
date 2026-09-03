@@ -1,10 +1,17 @@
 /**
  * Treasury service — the company's financial position.
  *
- * SWAP POINT — Sui object reads + accounting integration.
- *   The balances come from the demo world today and from the Treasury object
- *   plus an ERP feed later. Every derived figure is computed HERE, not in a
- *   component, so the interface never owns a financial rule.
+ * WHERE THE BALANCE COMES FROM. The Treasury OBJECT on Sui, whenever the chain
+ * can be read; the scenario fixture only when it cannot. That order matters and
+ * was the wrong way round: the page rendered `TIGHT_PROFILE`'s hardcoded
+ * $100,000 and the vault happened to hold $100,000 too, so the screen looked
+ * chain-derived while being a constant. Funding the vault to a different figure
+ * would not have moved it, and neither would a payment.
+ *
+ * Every derived figure — available above reserve, agent headroom, the forecast
+ * — is computed HERE from whichever world was supplied, so the interface never
+ * owns a financial rule and the two sources cannot disagree about the
+ * arithmetic, only about the inputs.
  */
 
 import type {
@@ -19,10 +26,18 @@ import type {
 import { buildProjection, type CashProjection } from "../deterministic/projection";
 import { compareDates } from "../util/date";
 import { SCENARIOS, scenarioById, DEMO_AS_OF_DATE } from "../demo/scenarios";
+import type { WorldSnapshot } from "../types";
 import { PAYMENT_HISTORY } from "../demo/paymentHistory";
 
 export interface TreasuryView {
   asOfDate: IsoDate;
+  /**
+   * Whether these figures came from the chain or from the offline fixture.
+   *
+   * Stated rather than inferred, so a surface can say which it is showing. A
+   * fixture that happens to match the vault is still a fixture.
+   */
+  fromChain: boolean;
   treasury: TreasuryState;
   policy: TreasuryPolicy;
   capability: AgentCapability;
@@ -49,9 +64,18 @@ export interface TreasuryView {
 export function buildTreasuryView(
   scenarioId: string,
   horizonDays = 21,
+  /**
+   * The world to measure, when the caller has read one from chain.
+   *
+   * Omitted offline and in tests, where the scenario's fixture stands in. A
+   * caller that passes one is stating that it read the chain; nothing here
+   * invents one.
+   */
+  chainWorld?: WorldSnapshot,
 ): TreasuryView {
   const scenario = scenarioById(scenarioId);
-  const { world, asOfDate } = scenario;
+  const asOfDate = scenario.asOfDate;
+  const world = chainWorld ?? scenario.world;
 
   const availableCents = Math.max(
     0,
@@ -75,6 +99,8 @@ export function buildTreasuryView(
 
   return {
     asOfDate,
+    /** True when every figure below was read from Sui rather than a fixture. */
+    fromChain: chainWorld !== undefined,
     treasury: world.treasury,
     policy: world.policy,
     capability: world.capability,

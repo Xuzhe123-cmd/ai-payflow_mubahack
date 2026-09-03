@@ -65,8 +65,11 @@ function TopBar() {
       <div className="flex items-center gap-2.5">
         {engine ? (
           <Badge tone={engine.engineMode === "fallback" ? "warning" : "ai"} dot>
+            {/* Consistent with the AI analysis and cash-flow panels: the
+                model being unreachable is a fact about the MODEL, and the
+                phrase says so without implying the invoice is blocked. */}
             {engine.engineMode === "fallback"
-              ? "Safety fallback — no model"
+              ? "Demo fallback — live AI unavailable"
               : `${engine.engineMode === "recorded" ? "Recorded" : "Workers AI"} · ${
                   engine.modelId?.split("/").pop() ?? "model"
                 }`}

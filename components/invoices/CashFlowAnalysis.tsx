@@ -7,6 +7,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/common/Panel";
 import { Badge, Eyebrow } from "@/components/common/Badge";
 import { CashFlowChart, ChartLegend } from "@/components/charts/CashFlowChart";
 import { formatDay, formatFullDate, formatMoneyRounded } from "@/lib/format";
+import { cashFlowRecommendation } from "@/lib/decision/cashFlowRecommendation";
 import type { AnalysisResponse } from "@/lib/services/contracts";
 import type { CashFlowScenario } from "@/lib/types";
 
@@ -22,7 +23,23 @@ import type { CashFlowScenario } from "@/lib/types";
 export function CashFlowAnalysis({ analysis }: { analysis: AnalysisResponse }) {
   const facts = analysis.analysis;
   const currency = facts.invoiceFacts.currency;
-  const recommended = analysis.decision.recommendedDate;
+
+  // THE TIMING ANSWER, AND WHERE IT CAME FROM.
+  //
+  // A live verdict is used when there is one; otherwise the deterministic
+  // scenario decides and says so. What no longer happens is the model's
+  // absence being reported as the treasury's refusal — the simulation below
+  // has run either way, and several dates usually clear the reserve.
+  const recommendation = cashFlowRecommendation({
+    scenarios: facts.cashFlowScenarios,
+    policy: facts.policyFacts,
+    asOfDate: facts.asOfDate,
+    liveRecommendedDate:
+      analysis.engine === "LLM" ? analysis.decision.recommendedDate : null,
+    liveExplanation: analysis.decision.cashFlowExplanation,
+  });
+  const recommended = recommendation.recommendedDate;
+  const isLive = recommendation.source === "LIVE";
 
   const [selected, setSelected] = useState<string>(
     recommended ?? facts.cashFlowScenarios[0]?.paymentDate ?? facts.asOfDate,
@@ -103,16 +120,64 @@ export function CashFlowAnalysis({ analysis }: { analysis: AnalysisResponse }) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-ai-border bg-ai-soft px-4 py-3.5">
-          <Eyebrow className="text-ai">AI recommendation</Eyebrow>
-          <div className="mt-1.5 text-[15px] font-semibold text-ink">
-            {recommended
-              ? `Schedule for ${formatFullDate(recommended)}`
-              : "No payment date — this invoice does not proceed"}
+        <div
+          className={cn(
+            "rounded-xl border px-4 py-3.5",
+            recommendation.noSafeDate
+              ? "border-neg/35 bg-neg-soft"
+              : "border-ai-border bg-ai-soft",
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Eyebrow className={recommendation.noSafeDate ? "text-neg" : "text-ai"}>
+              AI CFO recommendation
+            </Eyebrow>
+
+            {/* THE LABEL IS THE WHOLE POINT. A recorded recommendation is
+                useful; a recorded one wearing a LIVE badge is a lie, and this
+                is the one place a reader can tell them apart. */}
+            {isLive ? (
+              <Badge tone="ai" dot>
+                Live
+              </Badge>
+            ) : (
+              <Badge tone="warning">Demo fallback — live AI unavailable</Badge>
+            )}
           </div>
+
+          <div
+            className={cn(
+              "mt-1.5 text-[15px] font-semibold",
+              recommendation.noSafeDate ? "text-neg" : "text-ink",
+            )}
+          >
+            {recommended
+              ? recommendation.headline.startsWith("Schedule")
+                ? `Schedule for ${formatFullDate(recommended)}`
+                : recommendation.headline
+              : recommendation.headline}
+          </div>
+
           <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
-            {analysis.decision.cashFlowExplanation}
+            {recommendation.reason}
           </p>
+
+          {recommendation.comparison ? (
+            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">
+              {recommendation.comparison}
+            </p>
+          ) : null}
+
+          {/* Said plainly, under the recommendation rather than in place of it.
+              A recorded timing verdict authorizes nothing: Sui decides what may
+              settle, and it never consulted this. */}
+          {!isLive ? (
+            <p className="mt-2.5 border-t border-warn/25 pt-2 text-[11.5px] leading-relaxed text-ink-faint">
+              Recorded demo recommendation, derived from this invoice&rsquo;s deterministic
+              cash-flow scenario rather than from a model. It grants no authorization — Sui
+              decides what may settle.
+            </p>
+          ) : null}
         </div>
       </PanelBody>
     </Panel>

@@ -208,9 +208,59 @@ const MEANINGS: Record<number, AbortMeaning> = {
   },
 };
 
-/** What a Move abort code means, or null when this path cannot raise it. */
-export function abortMeaning(code: number | null | undefined): AbortMeaning | null {
+/**
+ * Codes 1 and 2 mean DIFFERENT THINGS depending on which authority was asked.
+ *
+ * `payment::evaluate` runs one rule body against a `Limits` value, and that
+ * value is built either from an agent's capability or from a human approval.
+ * Checks 1 and 2 ask "is this authority registered" and "is it still live" —
+ * so on the agent path they are the AgentCap, and on the human path they are
+ * the `HumanApproval` object, which `approval::limits_for` marks not-live when
+ * it is consumed, expired, minted against another treasury, or when the
+ * approver has since been revoked, has lapsed, has a stale membership reading,
+ * or has exhausted the day's authorization budget.
+ *
+ * WHY THIS MATTERS AND NOT ACADEMICALLY. Reporting `ECapabilityDisabled` on the
+ * human path as "the agent capability is revoked" sends a reader to inspect an
+ * AgentCap that is enabled and working, while the real cause — a spent daily
+ * budget — goes unlooked-at. That is not a wording nit; it is a wrong answer to
+ * "what do I fix".
+ */
+const HUMAN_PATH_MEANINGS: Record<number, AbortMeaning> = {
+  1: {
+    code: "APPROVAL_NOT_RECOGNIZED",
+    name: "EAgentNotAuthorized",
+    location: "payment::evaluate (human approval path)",
+    message:
+      "This approval is not recognised by the treasury it was presented to.",
+  },
+  2: {
+    code: "APPROVAL_NOT_LIVE",
+    name: "ECapabilityDisabled",
+    location: "approval::limits_for",
+    message:
+      "The human approval is no longer live. It has been spent or has expired, or the " +
+      "approver's authorization has been revoked, has lapsed, needs its membership " +
+      "re-verified, or has used up the amount it may authorize today. The agent's own " +
+      "capability is not involved on this path.",
+  },
+};
+
+/**
+ * What a Move abort code means, or null when this path cannot raise it.
+ *
+ * `target` is the Move function that raised it. Pass it wherever it is known:
+ * without it, codes 1 and 2 are reported in their agent-path sense, which is
+ * the right default only because `execute_payment` is the commoner call.
+ */
+export function abortMeaning(
+  code: number | null | undefined,
+  target?: string | null,
+): AbortMeaning | null {
   if (code === null || code === undefined) return null;
+  if (target && target.includes("execute_approved") && HUMAN_PATH_MEANINGS[code]) {
+    return HUMAN_PATH_MEANINGS[code];
+  }
   return MEANINGS[code] ?? null;
 }
 

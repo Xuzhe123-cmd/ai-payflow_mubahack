@@ -29,6 +29,39 @@ const POLICY_HEADLINE: Record<PolicyViolationCode, string> = {
 };
 
 /**
+ * Refusals raised by `approval::approve_scoped` and the human settlement path.
+ *
+ * These are Sui refusals like the ten above, but they are not failed policy
+ * CHECKS — they are the approval authority itself being absent, revoked, lapsed,
+ * out of scope, or exhausted. They needed their own list because every one of
+ * them previously arrived as the bare word "REFUSED": `violationForAbortCode`
+ * decodes 1..10 and returns null for everything else, so an abort of 602 — the
+ * signer holds no approver authorization at all — was indistinguishable on
+ * screen from any other failure.
+ */
+const APPROVAL_HEADLINE: Record<string, string> = {
+  NOT_AUTHORIZED_APPROVER: "Refused by Sui — this signer is not an authorized approver",
+  AMOUNT_EXCEEDS_LIMIT: "Refused by Sui — above the approver's per-payment limit",
+  EXCEEDS_DAILY_AUTHORIZATION: "Refused by Sui — above the approver's daily limit",
+  RECIPIENT_OUT_OF_SCOPE: "Refused by Sui — recipient outside the approver's scope",
+  APPROVER_REVOKED: "Refused by Sui — this approver's authority was revoked",
+  APPROVER_EXPIRED: "Refused by Sui — this approver's authority has expired",
+  NOT_AN_ACTIVE_MEMBER: "Refused by Sui — not an active member of the company",
+  MEMBER_CANNOT_APPROVE: "Refused by Sui — this role cannot approve payments",
+  MEMBERSHIP_READING_STALE: "Refused by Sui — the membership check is stale",
+  EXPIRY_IN_PAST: "Refused by Sui — the approval would already have expired",
+  LEGACY_PATH_SEALED: "Refused by Sui — the legacy approval path is sealed",
+  APPROVERS_NOT_READY: "Refused by Sui — the approver registry is not initialised",
+  WRONG_COMPANY: "Refused by Sui — bound to a different company",
+  WRONG_TREASURY: "Refused by Sui — bound to a different treasury",
+  APPROVAL_MISMATCH: "Refused by Sui — the approval is for a different invoice",
+  CIRCUIT_BREAKER_ACTIVE: "Blocked by the Sui circuit breaker",
+  APPROVAL_NOT_LIVE: "Refused by Sui — the human approval is no longer live",
+  APPROVAL_NOT_RECOGNIZED: "Refused by Sui — this approval is not recognised here",
+  CONDITIONAL_INVOICE: "Refused by Sui — this invoice settles only against a shipment",
+};
+
+/**
  * Refusals that happen before the chain is ever asked.
  *
  * Worded so the difference stays visible: "not submitted" means no transaction
@@ -49,6 +82,7 @@ const LOCAL_HEADLINE: Record<string, string> = {
 export function executionFailureHeadline(code: string): string {
   return (
     POLICY_HEADLINE[code as PolicyViolationCode] ??
+    APPROVAL_HEADLINE[code] ??
     LOCAL_HEADLINE[code] ??
     "No payment was submitted"
   );

@@ -22,6 +22,7 @@
  */
 
 import type { AutonomyVerdict } from "./autonomy";
+import type { ReadinessVerdict } from "./executionReadiness";
 import type { EscrowDemoStage } from "../escrow/demoFlow";
 import type { Cents } from "../types";
 
@@ -100,14 +101,87 @@ export interface AvailableActionInput {
    * nothing. So the granted flag reads the enforcement outcome, not the click.
    */
   humanApproval?: { outcome: "APPROVED" | "SUI_REJECT" } | null;
+  /**
+   * What the CHAIN currently permits, read live.
+   *
+   * THE VETO THIS BOX WAS MISSING. Everything else here is either local state
+   * or the pipeline's forecast, and a forecast cannot know that the agent's
+   * capability has been revoked, that the breaker is tripped, that the
+   * approver's daily authorization is spent, or that the approval on chain has
+   * stopped being live. The box said "AUTHORIZED · READY" through all four.
+   *
+   * `undefined` means the caller does not consult the chain — the offline
+   * pipeline tests, which have no chain to consult. `null` means the read is in
+   * flight, and is treated as "claim nothing", never as permission.
+   */
+  readiness?: ReadinessVerdict | null;
   /** A person declined outright. Terminal. */
   humanRejected?: boolean;
 }
+
+/** States in which the chain agrees a control may be offered. */
+const READY_STATES = new Set(["AUTONOMOUS_READY", "HUMAN_APPROVAL_READY", "HUMAN_APPROVAL_REQUIRED"]);
 
 export function availablePaymentAction(input: AvailableActionInput): PaymentActionState {
   const amount = money(input.amountCents);
   const held = money(input.fundsHeldCents);
   const supplier = input.supplierName ?? "the registered supplier";
+
+  // THE FRESH READING OVERRIDES THE CACHED ONE.
+  //
+  // `chainInvoiceStatus` comes from a module-scope cache that is loaded once
+  // per page so a list of invoices costs one request. That is right for a list
+  // and wrong for the moment after a settlement: the invoice becomes PAID on
+  // chain and the cached copy still says PENDING, so this box fell through to
+  // the recommendation and offered Execute on an invoice that had just been
+  // paid. Pressing it produced `INVOICE_ALREADY_PAID` from the server — a
+  // correct refusal that read as a broken button.
+  //
+  // `readiness` is fetched per mount with `cache: "no-store"`, so when it says
+  // SETTLED it is the later of the two readings and wins.
+  const chainStatus =
+    input.readiness?.state === "SETTLED" ? "PAID" : input.chainInvoiceStatus;
+
+  // ---- 0. THE CHAIN'S VETO, BEFORE ANYTHING ELSE IS CONSIDERED ------------
+  //
+  // Ordered first because it is the only input that knows what Sui would do
+  // NOW. It can only ever remove a control, never add one: a state the chain
+  // has not blessed falls through to a plain statement of why, and everything
+  // below still has to agree before a button appears.
+  //
+  // A settled invoice is allowed past, because the settlement branches below
+  // say more about it than this can — but only after its status has been
+  // corrected from the FRESH reading, see `chainStatus`.
+  if (input.readiness !== undefined && !isSettled(input.readiness)) {
+    if (input.readiness === null) {
+      return {
+        action: "NONE",
+        label: null,
+        headline: "READING CHAIN STATE…",
+        lead: null,
+        status: "Reading chain state",
+        detail: "Asking Sui what it currently permits for this invoice.",
+        facts: [],
+        tone: "neutral",
+        fundsLocked: false,
+        settled: false,
+      };
+    }
+    if (!READY_STATES.has(input.readiness.state)) {
+      return {
+        action: "NONE",
+        label: null,
+        headline: headlineFor(input.readiness.state),
+        lead: "Read from Sui",
+        status: statusFor(input.readiness.state),
+        detail: input.readiness.reason,
+        facts: ["No payment action available"],
+        tone: input.readiness.state === "SCHEDULED" ? "neutral" : "negative",
+        fundsLocked: false,
+        settled: false,
+      };
+    }
+  }
 
   // ---- 1. CHAIN SETTLEMENT -------------------------------------------------
   // The money has moved. Nothing the AI recommends can make this untrue, and a
@@ -136,7 +210,7 @@ export function availablePaymentAction(input: AvailableActionInput): PaymentActi
     };
   }
 
-  if (isPaidOnChain(input.chainInvoiceStatus)) {
+  if (isPaidOnChain(chainStatus)) {
     // An ordinary invoice the chain records as settled — possibly by a previous
     // session. The local run knows nothing about it, which is exactly why the
     // invoice object is asked rather than the run.
@@ -415,6 +489,37 @@ export function offersPaymentControl(state: PaymentActionState): boolean {
  */
 export function isPaidOnChain(status: string | null | undefined): boolean {
   return status === "PAID" || status === "SETTLED";
+}
+
+function isSettled(readiness: ReadinessVerdict | null): boolean {
+  return readiness?.state === "SETTLED";
+}
+
+/** The large word for a state the chain will not currently permit. */
+function headlineFor(state: ReadinessVerdict["state"]): string {
+  switch (state) {
+    case "APPROVAL_NOT_LIVE":
+      return "APPROVAL NOT LIVE";
+    case "SCHEDULED":
+      return "SCHEDULED";
+    case "UNKNOWN":
+      return "READING CHAIN STATE…";
+    default:
+      return "BLOCKED BY SUI";
+  }
+}
+
+function statusFor(state: ReadinessVerdict["state"]): string {
+  switch (state) {
+    case "APPROVAL_NOT_LIVE":
+      return "Approval not live";
+    case "SCHEDULED":
+      return "Scheduled for a later date";
+    case "UNKNOWN":
+      return "Reading chain state";
+    default:
+      return "Blocked by Sui";
+  }
 }
 
 function money(cents: Cents): string {

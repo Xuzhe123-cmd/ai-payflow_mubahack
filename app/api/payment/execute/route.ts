@@ -33,12 +33,45 @@ import { NextResponse } from "next/server";
 import { discoverInvoices } from "@/lib/sui/chainReader";
 import { createSuiQueries, graphqlUrlFor } from "@/lib/sui/client";
 import { MissingDeploymentError, configuredNetwork, loadManifest } from "@/lib/sui/manifest";
-import type { PaymentAuthority } from "@/lib/sui/paymentExecution";
+import type { PaymentAuthority, PaymentSubmission } from "@/lib/sui/paymentExecution";
 import type { PaymentRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
 /** A settlement must never be served from a cache. */
 export const dynamic = "force-dynamic";
+
+/**
+ * The refusal's own name, in the widest vocabulary that fits it.
+ *
+ * ORDER MATTERS. A failed policy check is reported as that check, because the
+ * interface renders those against the ten-assertion list. Only when the abort
+ * is NOT one of the ten does the wider Move dictionary answer — and only when
+ * neither knows it does this fall back to "REFUSED".
+ *
+ * That fallback used to be the ONLY answer for every code above 10, which is
+ * how `602 ENotAuthorizedApprover` — the most consequential refusal this
+ * product raises — reached the screen as the word "REFUSED" beside a raw
+ * MoveAbort dump.
+ */
+function refusalCodeFor(payment: PaymentSubmission | null | undefined): string {
+  return payment?.violation ?? payment?.refusalCode ?? "REFUSED";
+}
+
+/**
+ * The sentence shown to a person, with the chain's own text kept beside it.
+ *
+ * Never a substitute for the original: the decoded reason explains the rule and
+ * the raw error proves which line raised it, and dropping either one leaves a
+ * reader unable to check the other.
+ */
+function refusalMessageFor(payment: PaymentSubmission | null | undefined): string {
+  if (!payment) return "The chain refused this payment.";
+  if (!payment.reason) return payment.error ?? "The chain refused this payment.";
+  const named = payment.abortName
+    ? `Move abort ${payment.abortCode} ${payment.abortName}.`
+    : `Move abort ${payment.abortCode}.`;
+  return `${payment.reason} ${named}`;
+}
 
 /**
  * Whether this server will submit, and to which network.
@@ -104,6 +137,7 @@ export async function POST(request: Request) {
     paymentExecutionEnabled,
     executeAgentPayment,
     executeApprovedPayment,
+    findReusableApproval,
   } = await import("@/lib/sui/paymentExecution");
 
   let network;
@@ -213,16 +247,54 @@ export async function POST(request: Request) {
       live: true,
       network,
       authority,
-      code: payment.ok ? null : (payment.violation ?? "REFUSED"),
-      message: payment.ok
-        ? `Settled on ${network}.`
-        : (payment.error ?? "The chain refused this payment."),
+      code: payment.ok ? null : refusalCodeFor(payment),
+      message: payment.ok ? `Settled on ${network}.` : refusalMessageFor(payment),
       payment,
       invoiceObjectId: onChainInvoice.objectId,
     });
   }
 
-  const outcome = executeApprovedPayment(shared);
+  // AN APPROVAL ALREADY ON CHAIN IS SPENT RATHER THAN DUPLICATED.
+  //
+  // `approve_scoped` books the amount against the approver's daily budget at
+  // MINT time, permanently, whether or not the settlement that follows
+  // succeeds. Minting afresh on every click therefore spends the day's
+  // authorization on retries — and once it is gone, Move refuses every further
+  // payment with `execute_approved`'s abort 2, which is correct and looks
+  // exactly like a revoked capability.
+  //
+  // An unreachable chain is NOT read as "there is none": that mistake mints the
+  // duplicate this lookup exists to avoid, so it is reported instead.
+  let reusableApprovalId: string | null = null;
+  try {
+    reusableApprovalId = await findReusableApproval(
+      manifest,
+      graphqlUrlFor(network),
+      {
+        invoiceNumber: governed.invoiceNumber,
+        amountCents: governed.amountCents,
+        recipient: governed.recipientWallet,
+      },
+      nowMs,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The chain could not be reached.";
+    return NextResponse.json(
+      {
+        ok: false,
+        live: true,
+        network,
+        authority,
+        code: "CHAIN_UNAVAILABLE",
+        message:
+          "Existing approvals could not be read, so nothing was submitted. Minting another " +
+          `approval without checking would spend the day's authorization twice. ${message}`,
+      },
+      { status: 503 },
+    );
+  }
+
+  const outcome = executeApprovedPayment(shared, reusableApprovalId);
   // The mint is a real authorization and a real transaction whether or not the
   // settlement that follows succeeds, so it is reported either way rather than
   // collapsed into a single verdict.
@@ -234,13 +306,15 @@ export async function POST(request: Request) {
     live: true,
     network,
     authority,
-    code: ok ? null : (failed?.violation ?? "REFUSED"),
+    code: ok ? null : refusalCodeFor(failed),
     message: ok
       ? `Settled on ${network} under a scoped human approval.`
-      : (failed?.error ?? "The chain refused this payment."),
+      : refusalMessageFor(failed),
     payment: outcome.payment,
     approval: outcome.approval,
     approvalObjectId: outcome.approvalObjectId,
+    /** True when an approval already on chain was spent, not a new one minted. */
+    reusedApproval: outcome.reusedApproval,
     invoiceObjectId: onChainInvoice.objectId,
   });
 }

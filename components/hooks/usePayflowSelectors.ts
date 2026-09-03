@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { FinalOutcome } from "@/lib/types";
+import type { FinalOutcome, WorldSnapshot } from "@/lib/types";
 import type { DetectedInvoice } from "@/lib/services/inboxService";
 import type { EscrowDemoStage } from "@/lib/escrow/demoFlow";
 import { buildTreasuryView, type TreasuryView } from "@/lib/services/treasuryService";
+import { fetchChainSnapshot } from "@/lib/services/chainService";
+import { worldFromChain } from "@/lib/sui/chainWorld";
 import { usePayflow, type InvoiceRun } from "@/components/providers/PayflowProvider";
 import { useChainInvoices } from "@/components/hooks/useChainInvoice";
 import { useConditionStates } from "@/components/hooks/useConditionState";
@@ -142,9 +144,52 @@ export function useFeaturedInvoice(): InvoiceEntry | null {
 }
 
 /** The treasury position the dashboard and treasury page are describing. */
-export function useActiveTreasury(): { scenarioId: string; view: TreasuryView } {
-  const view = useMemo(() => buildTreasuryView(COMPANY_TREASURY_SCENARIO), []);
-  return { scenarioId: COMPANY_TREASURY_SCENARIO, view };
+/**
+ * The treasury position, measured against the CHAIN where it can be read.
+ *
+ * WHAT THIS FIXES. The view was built from the scenario fixture and nothing
+ * else, so "Total balance" was `TIGHT_PROFILE`'s hardcoded $100,000. The vault
+ * happened to hold $100,000 as well, which made the page look chain-derived
+ * while being a constant — funding the vault to any other figure, or settling a
+ * payment out of it, would not have moved the number on screen.
+ *
+ * The fixture is still the fallback, because the page must render offline and
+ * in tests. `view.fromChain` says which of the two is being shown, so no
+ * surface has to guess.
+ */
+export function useActiveTreasury(): {
+  scenarioId: string;
+  view: TreasuryView;
+  /** False until the chain read has settled, either way. */
+  resolved: boolean;
+} {
+  const [world, setWorld] = useState<WorldSnapshot | null>(null);
+  const [resolved, setResolved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchChainSnapshot()
+      .then((snapshot) => {
+        if (!cancelled) setWorld(worldFromChain(snapshot));
+      })
+      .catch(() => {
+        // An unreachable chain falls back to the fixture, which the view
+        // reports as `fromChain: false` rather than passing off as live.
+        if (!cancelled) setWorld(null);
+      })
+      .finally(() => {
+        if (!cancelled) setResolved(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const view = useMemo(
+    () => buildTreasuryView(COMPANY_TREASURY_SCENARIO, 21, world ?? undefined),
+    [world],
+  );
+  return { scenarioId: COMPANY_TREASURY_SCENARIO, view, resolved };
 }
 
 export interface InvoiceStats {

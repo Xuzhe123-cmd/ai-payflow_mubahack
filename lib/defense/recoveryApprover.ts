@@ -20,7 +20,11 @@
 
 import type { createSuiQueries } from "../sui/client";
 import { extractFields, readBool, readU64 } from "../sui/decode";
+import { unitsToCents } from "../sui/units";
 import { MEMBERSHIP_SYNC_MAX_AGE_MS } from "../identity/paymentAuthority";
+
+/** Milliseconds in the day bucket Move buckets approvals into. */
+const MS_PER_DAY = 86_400_000;
 
 export interface RecoveryApprover {
   address: string;
@@ -32,6 +36,20 @@ export interface RecoveryApprover {
   membershipAgeMs: number | null;
   /** Every condition `approver_in_good_standing` checks, already true. */
   inGoodStanding: boolean;
+  /**
+   * The ceilings and the day's bookings, as the treasury holds them.
+   *
+   * Carried because readiness has to say WHY a payment cannot be authorized,
+   * and "the approver has already authorized $45,300 of their $50,000 today" is
+   * an answer a person can act on where "not authorized" is not. Read from
+   * chain, never from a constant.
+   *
+   * `authorizedTodayCents` is booked at MINT time by `approve_scoped`, not at
+   * settlement — which is why a day's budget can be spent with nothing paid.
+   */
+  maxSingleCents: number;
+  dailyLimitCents: number;
+  authorizedTodayCents: number;
   /**
    * True when the ONLY unmet condition is freshness.
    *
@@ -71,7 +89,16 @@ export async function readRecoveryRoster(
     if (!address || !address.startsWith("0x")) continue;
 
     const value = extractFields(entry.value);
-    if (readU64(value, "max_single") === null) continue;
+    const maxSingle = readU64(value, "max_single");
+    if (maxSingle === null) continue;
+
+    // The day's bookings only count while the bucket is the current one —
+    // exactly as `treasury::approver_authorized_today` reads it, so a stale
+    // bucket reports zero here for the same reason it does on chain.
+    const dayBucket = Number(readU64(value, "day_bucket") ?? BigInt(0));
+    const bookedRaw = readU64(value, "authorized_today") ?? BigInt(0);
+    const authorizedTodayCents =
+      dayBucket === Math.floor(nowMs / MS_PER_DAY) ? unitsToCents(bookedRaw) : 0;
 
     const enabled = readBool(value, "enabled") ?? false;
     const expiresAtMs = Number(readU64(value, "expires_at_ms") ?? BigInt(0));
@@ -99,6 +126,9 @@ export async function readRecoveryRoster(
       inGoodStanding: withoutFreshness && fresh,
       // Everything else holds; only the reading has aged out.
       staleOnly: withoutFreshness && !fresh,
+      maxSingleCents: unitsToCents(maxSingle),
+      dailyLimitCents: unitsToCents(readU64(value, "daily_limit") ?? BigInt(0)),
+      authorizedTodayCents,
     });
   }
 

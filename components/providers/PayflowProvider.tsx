@@ -38,6 +38,7 @@ import {
   type DetectedInvoice,
 } from "@/lib/services/inboxService";
 import { listInvoices } from "@/lib/services/invoiceListService";
+import { refreshChainInvoices } from "@/components/hooks/useChainInvoice";
 import {
   executePayment as submitPayment,
   readExecutionMode,
@@ -849,6 +850,12 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
       // invoice stays unpaid, and the reason is put on screen.
       try {
         const receipt = await submitPayment(request, authority);
+        // THE CACHED INVOICE LIST IS NOW WRONG. It was loaded once for the
+        // page and still records this invoice as unpaid; leaving it would let
+        // the outcome box offer Execute on something that has just settled.
+        // Dropped BEFORE the state change, so anything re-reading in response
+        // to it gets the new answer rather than the stale one.
+        refreshChainInvoices();
         dispatch({
           type: "RUN_PATCH",
           invoiceId,
@@ -866,6 +873,14 @@ export function PayflowProvider({ children }: { children: ReactNode }) {
           ),
         );
       } catch (error) {
+        // A refusal can ALSO mean the cache is stale — `INVOICE_ALREADY_PAID`
+        // says the chain settled this invoice and this browser had not noticed.
+        // Re-reading turns the next render into an accurate PAID rather than
+        // another Execute button over the same refusal.
+        if (error instanceof PaymentRefusedError && error.code === "INVOICE_ALREADY_PAID") {
+          refreshChainInvoices();
+        }
+
         const refusal =
           error instanceof PaymentRefusedError
             ? error

@@ -678,3 +678,178 @@ fun another_companys_word_does_not_count() {
         abort 0
     }
 }
+
+// --- the day's budget is charged ONCE ----------------------------------------
+//
+// THE BUG THESE HOLD SHUT. `approve_scoped` books the amount against the day at
+// MINT time. `approval::limits_for` then re-asked the treasury at EXECUTION
+// time, and the question it asked — through `approver_can_authorize` — was the
+// mint question: "may this approver authorize `amount` MORE today?" By then the
+// amount was already in `authorized_today`, so it was charged twice, and an
+// approver who had legitimately minted several approvals inside their daily
+// limit could settle none of them.
+
+/// Reads the settle-time verdict without going through a HumanApproval object,
+/// so a test with several pending approvals can name the one it means.
+fun can_settle(sc: &mut ts::Scenario, amount: u64, at_ms: u64): bool {
+    sc.next_tx(h::approver());
+    let vault = sc.take_shared<Treasury<MOCK_USDC>>();
+    let verdict = treasury::approver_can_settle(
+        &vault,
+        h::approver(),
+        amount,
+        h::supplier_wallet(),
+        at_ms,
+    );
+    ts::return_shared(vault);
+    verdict
+}
+
+/// The MINT-time verdict, whose semantics this change deliberately leaves alone.
+fun can_authorize_more(sc: &mut ts::Scenario, amount: u64, at_ms: u64): bool {
+    sc.next_tx(h::approver());
+    let vault = sc.take_shared<Treasury<MOCK_USDC>>();
+    let verdict = treasury::approver_can_authorize(
+        &vault,
+        h::approver(),
+        amount,
+        h::supplier_wallet(),
+        at_ms,
+    );
+    ts::return_shared(vault);
+    verdict
+}
+
+fun lower_daily_limit(sc: &mut ts::Scenario, daily_limit: u64) {
+    sc.next_tx(h::admin());
+    let mut vault = sc.take_shared<Treasury<MOCK_USDC>>();
+    let cap = sc.take_from_sender<TreasuryOwnerCap>();
+    treasury::set_approver_limits(
+        &mut vault,
+        &cap,
+        h::approver(),
+        h::usd(25_000),
+        daily_limit,
+        h::now_ms() + MONTH_MS,
+    );
+    ts::return_shared(vault);
+    sc.return_to_sender(cap);
+}
+
+#[test]
+fun several_approvals_inside_the_day_can_all_be_settled() {
+    // $25,000 + $20,000 = $45,000 booked against a $50,000 day. Every one of
+    // them was granted legitimately, so every one of them must be spendable.
+    let mut sc = h::setup();
+    grant_default(&mut sc);
+    approve_at(&mut sc, h::usd(25_000), h::supplier_wallet(), h::now_ms());
+    approve_at(&mut sc, h::usd(20_000), h::supplier_wallet(), h::now_ms());
+
+    assert!(can_settle(&mut sc, h::usd(25_000), h::now_ms()), 0);
+    assert!(can_settle(&mut sc, h::usd(20_000), h::now_ms()), 1);
+    sc.end();
+}
+
+#[test]
+fun the_old_mint_question_would_have_refused_them() {
+    // The same state, asked the wrong question. $45,000 is already booked, so
+    // "may I authorize $20,000 MORE?" is correctly NO — and that is precisely
+    // why it was the wrong thing to ask at execution, where the $20,000 had
+    // already been paid for.
+    let mut sc = h::setup();
+    grant_default(&mut sc);
+    approve_at(&mut sc, h::usd(25_000), h::supplier_wallet(), h::now_ms());
+    approve_at(&mut sc, h::usd(20_000), h::supplier_wallet(), h::now_ms());
+
+    assert!(!can_authorize_more(&mut sc, h::usd(20_000), h::now_ms()), 0);
+    assert!(can_settle(&mut sc, h::usd(20_000), h::now_ms()), 1);
+    sc.end();
+}
+
+#[test]
+fun a_lone_approval_is_no_longer_charged_against_itself() {
+    // One $20,000 approval against a $30,000 day. The old rule evaluated
+    // $20,000 + $20,000 = $40,000 and refused it; nothing else had happened.
+    let mut sc = h::setup();
+    grant(&mut sc, h::usd(25_000), h::usd(30_000), h::now_ms() + MONTH_MS, vector[]);
+    approve_at(&mut sc, h::usd(20_000), h::supplier_wallet(), h::now_ms());
+
+    assert!(!can_authorize_more(&mut sc, h::usd(20_000), h::now_ms()), 0);
+    assert!(can_settle(&mut sc, h::usd(20_000), h::now_ms()), 1);
+    // And the approval object itself now reports live, which is what
+    // `payment::execute_approved` consults.
+    assert!(approval_live(&mut sc, h::now_ms()), 2);
+    sc.end();
+}
+
+#[test]
+fun lowering_the_daily_limit_still_kills_a_pending_approval() {
+    // THE PROPERTY THE FIX MUST NOT COST. Settle-time re-checking exists so an
+    // admin can withdraw authority AFTER an approval was minted. Dropping the
+    // day's ceiling below what has already been booked must still stop it.
+    let mut sc = h::setup();
+    grant_default(&mut sc);
+    approve_at(&mut sc, h::usd(20_000), h::supplier_wallet(), h::now_ms());
+    assert!(can_settle(&mut sc, h::usd(20_000), h::now_ms()), 0);
+
+    lower_daily_limit(&mut sc, h::usd(10_000));
+    assert!(!can_settle(&mut sc, h::usd(20_000), h::now_ms()), 1);
+    assert!(!approval_live(&mut sc, h::now_ms()), 2);
+    sc.end();
+}
+
+#[test]
+fun settling_still_respects_every_other_scope() {
+    // The change touches the daily arithmetic and nothing else. Revocation,
+    // expiry, the per-payment ceiling and the recipient allowlist all still
+    // refuse through the same function.
+    let mut sc = h::setup();
+    grant(
+        &mut sc,
+        h::usd(25_000),
+        h::usd(50_000),
+        h::now_ms() + MONTH_MS,
+        vector[h::supplier_wallet()],
+    );
+    approve_at(&mut sc, h::usd(4_800), h::supplier_wallet(), h::now_ms());
+
+    // Above the per-payment ceiling.
+    assert!(!can_settle(&mut sc, h::usd(30_000), h::now_ms()), 0);
+    // Past the expiry.
+    assert!(!can_settle(&mut sc, h::usd(4_800), h::now_ms() + 2 * MONTH_MS), 1);
+
+    // Outside the recipient allowlist.
+    sc.next_tx(h::approver());
+    {
+        let vault = sc.take_shared<Treasury<MOCK_USDC>>();
+        assert!(
+            !treasury::approver_can_settle(
+                &vault,
+                h::approver(),
+                h::usd(4_800),
+                h::attacker_wallet(),
+                h::now_ms(),
+            ),
+            2,
+        );
+        ts::return_shared(vault);
+    };
+
+    // And revocation.
+    revoke(&mut sc);
+    assert!(!can_settle(&mut sc, h::usd(4_800), h::now_ms()), 3);
+    sc.end();
+}
+
+#[test]
+fun the_day_still_rolls_over() {
+    let mut sc = h::setup();
+    grant_default(&mut sc);
+    approve_at(&mut sc, h::usd(25_000), h::supplier_wallet(), h::now_ms());
+    // A day later the bucket is stale, so nothing is counted as used at all.
+    // The membership mirror has to be refreshed first: a reading that old is
+    // not trusted, which is a separate rule and still in force.
+    sync(&mut sc, h::now_ms() + h::day_ms());
+    assert!(can_settle(&mut sc, h::usd(25_000), h::now_ms() + h::day_ms()), 0);
+    sc.end();
+}

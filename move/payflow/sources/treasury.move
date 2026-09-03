@@ -677,6 +677,59 @@ public fun approver_can_authorize<T>(
     used + amount <= auth.daily_limit
 }
 
+/// Whether an approval that was ALREADY BOOKED may still be settled.
+///
+/// ─────────────────────────────────────────────────────────────────────────
+/// WHY THIS EXISTS, AND WHY IT IS NOT `approver_can_authorize`.
+///
+/// The day's budget is charged ONCE, at mint time: `approve_scoped` asserts the
+/// headroom itself and then calls `record_approver_authorization`, which adds
+/// the amount to `authorized_today`. Settlement charges nothing further —
+/// `payment::record_settlement` books only AGENT spend, and passes
+/// `option::none()` on the human path.
+///
+/// `approver_can_authorize` answers the MINT question: "may this approver
+/// authorize `amount` MORE today?" — so it adds the amount to what is already
+/// used. Asking it again at execution charges the same authorization twice,
+/// because by then `authorized_today` already contains it.
+///
+/// THE EFFECT WAS REAL AND STRICTER THAN INTENDED. An approver with a $50,000
+/// daily limit who minted $14,700, $8,000 and $22,600 in one day had booked
+/// $45,300 — inside the limit, correctly. Settling the $8,000 then evaluated
+/// $45,300 + $8,000 = $53,300 against $50,000, found it over, and reported the
+/// approval as not live. Every one of those approvals was legitimately granted
+/// and none of them could be spent.
+///
+/// So this asks the SETTLE question: "is the day's booked total still within
+/// what this approver may authorize?" No addition, because the addition already
+/// happened.
+///
+/// IT IS NOT A LOOSENING. `used <= daily_limit` still fails when an admin
+/// LOWERS the daily limit below what the day has already booked, which is the
+/// revocation property the execution-time re-check exists for. Everything else
+/// — standing, expiry, membership and its freshness, the per-payment ceiling,
+/// the recipient allowlist — is re-checked here exactly as before.
+/// ─────────────────────────────────────────────────────────────────────────
+public fun approver_can_settle<T>(
+    treasury: &Treasury<T>,
+    approver: address,
+    amount: u64,
+    recipient: address,
+    now_ms: u64,
+): bool {
+    if (!approver_in_good_standing(treasury, approver, now_ms)) return false;
+    let auth: &ApproverAuthorization = df::borrow(&treasury.id, approver);
+
+    if (amount > auth.max_single) return false;
+    if (!auth.allowed_recipients.is_empty() && !auth.allowed_recipients.contains(&recipient)) {
+        return false
+    };
+
+    // The day's bookings, which ALREADY include this approval's amount.
+    let used = if (auth.day_bucket == day_of(now_ms)) auth.authorized_today else 0;
+    used <= auth.daily_limit
+}
+
 /// Books an authorisation against the day's budget. Called at mint time.
 public(package) fun record_approver_authorization<T>(
     treasury: &mut Treasury<T>,

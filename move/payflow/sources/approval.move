@@ -270,15 +270,25 @@ public fun limits_for<T>(
     // minted by `approve` names an approver who holds no treasury authorisation,
     // so `can_authorize` is false and the approval is not live.
     //
-    // `approver_can_authorize` also asks whether the company still recognises
-    // this person — from the mirror, and only while that reading is fresh. A
+    // `approver_can_settle` also asks whether the company still recognises this
+    // person — from the mirror, and only while that reading is fresh. A
     // membership revoked after this approval was signed therefore kills it, as
     // does a mirror nobody has refreshed. Both directions fail closed.
+    //
+    // SETTLE, NOT AUTHORIZE. This used to call `approver_can_authorize`, which
+    // asks "may this approver authorize `amount` MORE today?" and therefore
+    // ADDS the amount to the day's total. But `approve_scoped` already charged
+    // this very amount at mint time, so asking the mint question again at
+    // execution charged it twice — and an approver who had legitimately minted
+    // several approvals inside their daily limit could then settle none of
+    // them. `approver_can_settle` asks whether the day's BOOKED total is still
+    // within the limit, which is the question this moment is actually about,
+    // and which still fails when an admin lowers the limit after the mint.
     let live =
         !approval.consumed
             && approval.treasury_id == object::id(treasury)
             && now <= approval.expires_at_ms
-            && treasury::approver_can_authorize(
+            && treasury::approver_can_settle(
                 treasury,
                 approval.approver,
                 approval.amount,

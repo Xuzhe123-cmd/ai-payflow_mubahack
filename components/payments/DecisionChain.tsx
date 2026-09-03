@@ -17,6 +17,7 @@ import { ExecutionFailureNotice } from "@/components/payments/ExecutionFailureNo
 import { AiProviders } from "@/components/payments/AiProviders";
 import { useConditionState, type ConditionState } from "@/components/hooks/useConditionState";
 import { useChainInvoice } from "@/components/hooks/useChainInvoice";
+import { useExecutionReadiness } from "@/components/hooks/useExecutionReadiness";
 import { evaluateShipmentEvidence } from "@/lib/oracle/evidence";
 import { money } from "@/lib/escrow/present";
 import { decideAutonomy } from "@/lib/payments/autonomy";
@@ -394,6 +395,12 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
     analysis.analysis.invoiceFacts.invoiceNumber,
   );
 
+  // WHAT THE CHAIN CURRENTLY PERMITS. Read-only, and the reason this box may
+  // say "ready" at all: the pipeline's forecast is computed before anyone
+  // clicks and knows nothing about a revoked capability, a tripped breaker, a
+  // spent approver budget, or an approval that has stopped being live.
+  const readiness = useExecutionReadiness(analysis.analysis.invoiceFacts.invoiceNumber);
+
   const currency = analysis.analysis.invoiceFacts.currency;
   const executing = run.status === "EXECUTING";
 
@@ -425,7 +432,31 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
     // click, is what counts.
     humanApproval: run.approval ? { outcome: run.approval.enforcement.outcome } : null,
     humanRejected: run.humanRejected,
+    // THE CHAIN'S OWN VETO. Null while the read is in flight, which the rule
+    // treats as "claim nothing" rather than as permission.
+    readiness: readiness.verdict,
   });
+
+  // A READ THAT FAILED IS NOT A REFUSAL, AND MUST NOT BE A DEAD END. Without
+  // this the button simply vanishes when the chain is unreachable, with nothing
+  // said and nothing to press — the same "it does nothing" the whole execution
+  // path was just cured of, reintroduced one layer up.
+  const readinessError =
+    readiness.resolved && readiness.error ? (
+      <div className="mt-3 rounded-lg border border-warn/35 bg-warn-soft px-3 py-2.5">
+        <div className="text-[12px] font-semibold text-warn">
+          Sui could not be read, so nothing is claimed
+        </div>
+        <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-soft">{readiness.error}</p>
+        <button
+          type="button"
+          onClick={readiness.refresh}
+          className="mt-2 text-[11.5px] font-medium text-chain underline underline-offset-2"
+        >
+          Try reading the chain again
+        </button>
+      </div>
+    ) : null;
 
   // ---- CHAIN SETTLEMENT AND ESCROW STATE COME FIRST -----------------------
   // What has already happened outranks what was recommended. An invoice that
@@ -601,7 +632,7 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
             action.tone === "warning" ? "text-warn" : "text-pos",
           )}
         >
-          {resolved ? action.headline : "ALLOWED"}
+          {resolved && readiness.resolved ? action.headline : "READING CHAIN STATE…"}
         </span>
       </div>
 
@@ -731,6 +762,8 @@ function OutcomeBlock({ entry }: { entry: InvoiceEntry }) {
         ) : null}
       </div>
       )}
+
+      {readinessError}
 
       {/* A digest is shown ONLY for a network that actually settled one.
           The demo adapter returns network "demo", and rendering its digest in
