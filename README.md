@@ -258,3 +258,19 @@ npm install && cp .env.example .env.local && npm run dev
 Setup, environment variables, and the full command list:
 [`docs/RUNNING.md`](docs/RUNNING.md). Publishing to testnet:
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+---
+
+## AI tools used
+
+This project was built with AI assistance, and it is worth being explicit about
+where:
+
+| Tool            | Used for                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **ChatGPT**     | Planning — problem framing, the AI-recommends / Sui-enforces split, the scenario catalogue, and the shape of the policy model. |
+| **Claude Code** | Building — the Next.js app, the TypeScript pipeline under `lib/`, the Move package, and the test suites.                       |
+
+Every design decision above was reviewed by a human before it landed, and the
+invariants the tests pin down exist precisely because generated code needs
+something that does not take its word for it.
